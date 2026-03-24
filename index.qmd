@@ -1,0 +1,17 @@
+---
+title: "Polars Analysis"
+---
+
+This site collects analysis notes and benchmarks built around Polars.
+
+The current write-up compares a Polars `.group_by_dynamic()` workflow against an equivalent DuckDB window query for rolling 60-month beta estimation.
+
+The main write-up is here:
+
+- [Analysis](analysis.qmd)
+
+The project is set up as a Quarto website, so you can publish it with:
+
+```bash
+quarto publish gh-pages
+```
