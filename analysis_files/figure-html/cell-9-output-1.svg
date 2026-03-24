@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1732pt" height="218pt" viewBox="0.00 0.00 1731.75 218.25">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 214.25)">
+<title>polars_query</title>
+<polygon fill="white" stroke="none" points="-4,4 -4,-214.25 1727.75,-214.25 1727.75,4 -4,4"/>
+<!-- p2 -->
+<g id="node1" class="node">
+<title>p2</title>
+<polygon fill="none" stroke="black" points="1723.75,-138.25 0,-138.25 0,-78.5 1723.75,-78.5 1723.75,-138.25"/>
+<text text-anchor="middle" x="861.88" y="-120.95" font-family="Monospace" font-size="14.00">AGG [[(col("mkt_excess").covariance([col("ret_excess")])) / (col("mkt_excess").var())].alias("beta"), col("ret_excess").mean().alias("mean_ret"), col("mkt_excess").mean().alias("mean_mkt"), len().alias("n")]</text>
+<text text-anchor="middle" x="861.88" y="-103.7" font-family="Monospace" font-size="14.00">BY</text>
+<text text-anchor="middle" x="861.88" y="-86.45" font-family="Monospace" font-size="14.00">[col("firm_id")]</text>
+</g>
+<!-- p1 -->
+<g id="node2" class="node">
+<title>p1</title>
+<polygon fill="none" stroke="black" points="1001.88,-210.25 721.88,-210.25 721.88,-174.25 1001.88,-174.25 1001.88,-210.25"/>
+<text text-anchor="middle" x="861.88" y="-187.57" font-family="Monospace" font-size="14.00">FILTER BY [(col("n")) &gt;= (1000)]</text>
+</g>
+<!-- p2&#45;&gt;p1 -->
+<g id="edge1" class="edge">
+<title>p2-&gt;p1</title>
+<path fill="none" stroke="black" d="M861.88,-138.47C861.88,-146.41 861.88,-154.99 861.88,-162.89"/>
+<polygon fill="black" stroke="black" points="858.38,-162.65 861.88,-172.65 865.38,-162.65 858.38,-162.65"/>
+</g>
+<!-- p3 -->
+<g id="node3" class="node">
+<title>p3</title>
+<polygon fill="none" stroke="black" points="1001.88,-42.5 721.88,-42.5 721.88,0 1001.88,0 1001.88,-42.5"/>
+<text text-anchor="middle" x="861.88" y="-25.2" font-family="Monospace" font-size="14.00">Parquet SCAN [synthetic.parquet]</text>
+<text text-anchor="middle" x="861.88" y="-7.95" font-family="Monospace" font-size="14.00">π 4/4;</text>
+</g>
+<!-- p3&#45;&gt;p2 -->
+<g id="edge2" class="edge">
+<title>p3-&gt;p2</title>
+<path fill="none" stroke="black" d="M861.88,-42.86C861.88,-50.16 861.88,-58.66 861.88,-67.04"/>
+<polygon fill="black" stroke="black" points="858.38,-66.76 861.88,-76.76 865.38,-66.76 858.38,-66.76"/>
+</g>
+</g>
+</svg>
