@@ -1,13 +1,14 @@
 *.pyc
 *.pyo
 __pycache__/
+.vscode/
 .quarto/
 _site/
 .jupyter_cache/
-*.quarto_ipynb
+*.quarto_ipynb*
 analysis_files/
 benchmark.duckdb
 synthetic.parquet
 
 /.quarto/
-**/*.quarto_ipynb
+**/*.quarto_ipynb*
