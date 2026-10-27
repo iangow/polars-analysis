@@ -6,8 +6,9 @@
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
+<meta name="dcterms.date" content="2026-10-27">
 
-<title>Comparing .group_by_dynamic() with DuckDB equivalent – Polars Dynamic Group Benchmark</title>
+<title>Polars 2.1: Memory use in overlapping 60-month windows – Polars Analysis</title>
 <style>
 /* Default styles provided by pandoc.
 ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
@@ -61,7 +62,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </style>
 
 
-<script src="https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.min.js" integrity="sha384-ZvpUoO/+PpLXR1lu4jmpXWu80pZlYUAfxl5NsBMWOEPSjUn/6Z/hRTt8+pR6L4N2" crossorigin="anonymous"></script><script src="site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="site_libs/quarto-nav/quarto-nav.js"></script>
 <script src="site_libs/quarto-nav/headroom.min.js"></script>
 <script src="site_libs/clipboard/clipboard.min.js"></script>
 <script src="site_libs/quarto-search/autocomplete.umd.js"></script>
@@ -105,10 +106,6 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
     "search-label": "Search"
   }
 }</script>
-<script src="https://cdn.jsdelivr.net/npm/requirejs@2.3.6/require.min.js" integrity="sha384-c9c+LnTbwQ3aujuU7ULEPVvgLs+Fn6fJUvIGTsuu1ZcCf11fiEubah0ttpca4ntM sha384-6V1/AdqZRWk1KAlWbKBlGhN7VG4iE/yAZcO6NZPMF8od0vukrvr0tg4qY6NSrItx" crossorigin="anonymous"></script>
-
-<script type="application/javascript">define('jquery', [],function() {return window.jQuery;})</script>
-<script src="https://cdn.jsdelivr.net/npm/@jupyter-widgets/html-manager@*/dist/embed-amd.js" crossorigin="anonymous"></script>
 
 
 </head>
@@ -121,7 +118,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
       <div class="navbar-container container-fluid">
       <div class="navbar-brand-container mx-auto">
     <a class="navbar-brand" href="./index.html">
-    <span class="navbar-title">Polars Dynamic Group Benchmark</span>
+    <span class="navbar-title">Polars Analysis</span>
     </a>
   </div>
             <div id="quarto-search" class="" title="Search"></div>
@@ -154,8 +151,17 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
     <h2 id="toc-title">On this page</h2>
    
   <ul>
-  <li><a href="#generate-the-data" id="toc-generate-the-data" class="nav-link active" data-scroll-target="#generate-the-data">Generate the data</a></li>
-  <li><a href="#benchmark" id="toc-benchmark" class="nav-link" data-scroll-target="#benchmark">Benchmark</a></li>
+  <li><a href="#the-original-query" id="toc-the-original-query" class="nav-link active" data-scroll-target="#the-original-query">The original query</a></li>
+  <li><a href="#full-size-results-with-matching-windows" id="toc-full-size-results-with-matching-windows" class="nav-link" data-scroll-target="#full-size-results-with-matching-windows">Full-size results with matching windows</a>
+  <ul class="collapse">
+  <li><a href="#aligning-duckdb-with-polars" id="toc-aligning-duckdb-with-polars" class="nav-link" data-scroll-target="#aligning-duckdb-with-polars">Aligning DuckDB with Polars</a></li>
+  </ul></li>
+  <li><a href="#a-self-contained-synthetic-reproducer" id="toc-a-self-contained-synthetic-reproducer" class="nav-link" data-scroll-target="#a-self-contained-synthetic-reproducer">A self-contained synthetic reproducer</a></li>
+  <li><a href="#released-wheel-and-compiled-patch" id="toc-released-wheel-and-compiled-patch" class="nav-link" data-scroll-target="#released-wheel-and-compiled-patch">Released wheel and compiled patch</a></li>
+  <li><a href="#implementation-and-tested-fix" id="toc-implementation-and-tested-fix" class="nav-link" data-scroll-target="#implementation-and-tested-fix">Implementation and tested fix</a></li>
+  <li><a href="#two-candidate-patches" id="toc-two-candidate-patches" class="nav-link" data-scroll-target="#two-candidate-patches">Two candidate patches</a></li>
+  <li><a href="#what-about-spilling-in-polars-2.1" id="toc-what-about-spilling-in-polars-2.1" class="nav-link" data-scroll-target="#what-about-spilling-in-polars-2.1">What about spilling in Polars 2.1?</a></li>
+  <li><a href="#files-and-checks" id="toc-files-and-checks" class="nav-link" data-scroll-target="#files-and-checks">Files and checks</a></li>
   </ul>
 </nav>
     </div>
@@ -164,7 +170,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 
 <header id="title-block-header" class="quarto-title-block default">
 <div class="quarto-title">
-<h1 class="title">Comparing <code>.group_by_dynamic()</code> with DuckDB equivalent</h1>
+<h1 class="title">Polars 2.1: Memory use in overlapping 60-month windows</h1>
 </div>
 
 
@@ -172,6 +178,12 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <div class="quarto-title-meta">
 
     
+    <div>
+    <div class="quarto-title-meta-heading">Published</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">October 27, 2026</p>
+    </div>
+  </div>
   
     
   </div>
@@ -181,573 +193,273 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </header>
 
 
-<p>Recently, I wrote a Polars query to calculate 60-month betas (i.e., regression coefficients) for each firm and each month in a sample of stock price data. The pandas code in the <a href="https://www.tidy-finance.org/python/beta-estimation.html#estimating-beta-using-daily-returns">original book</a> from which the query originates uses a cumbersome batch-processing approach to minimize RAM consumption. I had figured that Polars would do fine with this query, but when I ran it in its original form it used up over 80 GB of RAM before failing (I only have 24 GB of physical RAM in my Mac mini M4 Pro).</p>
-<p>My guess is that Polars is creating copies of the data to construct each window. I don’t know anything about the internals of Polars, but this copying seems unnecessary in principle. I believe that PostgreSQL uses the windows in place without copying. The window here are sixty months of daily return data with the resulting calculations for each firm being retained the first day of each month.</p>
-<p>To create a reproducible test, I create synthetic data (a little smaller than the original) and save it in Parquet format. I then run the key elements of the Polar query on this data set and, as a proxy for PostgreSQL, I use DuckDB to do the same query.</p>
-<p>In summary, I find that DuckDB runs much faster and uses much less RAM than Polars. I conjecture that this is because DuckDB is not copying data to form each window.</p>
-<div id="b5f46c55" class="cell" data-execution_count="1">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> inspect</span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> polars <span class="im">as</span> pl</span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> duckdb</span>
-<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> json</span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> subprocess</span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> sys</span>
-<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> pathlib <span class="im">import</span> Path</span>
-<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> numpy <span class="im">as</span> np</span>
-<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> datetime <span class="im">import</span> date, timedelta</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-</div>
-<section id="generate-the-data" class="level2">
-<h2 class="anchored" data-anchor-id="generate-the-data">Generate the data</h2>
-<p>Here I generate some synthetic data and save it in a Parquet file. Apart from potentially facilitating a streaming engine (not available in this case at this time), this makes it easy to do the same query in DuckDB and Polars.</p>
-<div id="1242e3fe" class="cell" data-execution_count="2">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb2"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> write_synth_parquet(</span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    path: <span class="bu">str</span> <span class="op">|</span> Path,</span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    n_firms: <span class="bu">int</span> <span class="op">=</span> <span class="dv">10_000</span>,</span>
-<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>    n_days: <span class="bu">int</span> <span class="op">=</span> <span class="dv">2_500</span>,</span>
-<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>    seed: <span class="bu">int</span> <span class="op">=</span> <span class="dv">0</span>,</span>
-<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>):</span>
-<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>    path <span class="op">=</span> Path(path)</span>
-<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>    rng <span class="op">=</span> np.random.default_rng(seed)</span>
-<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>    start <span class="op">=</span> date(<span class="dv">2000</span>, <span class="dv">1</span>, <span class="dv">1</span>)</span>
-<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>    dates <span class="op">=</span> np.array(</span>
-<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>        [start <span class="op">+</span> timedelta(days<span class="op">=</span>i) <span class="cf">for</span> i <span class="kw">in</span> <span class="bu">range</span>(n_days)],</span>
-<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>        dtype<span class="op">=</span><span class="st">"datetime64[D]"</span>,</span>
-<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>    )</span>
-<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>    df <span class="op">=</span> pl.DataFrame(</span>
-<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>        {</span>
-<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>            <span class="st">"firm_id"</span>: np.repeat(np.arange(n_firms, dtype<span class="op">=</span>np.int32), n_days),</span>
-<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a>            <span class="st">"date"</span>: np.tile(dates, n_firms),</span>
-<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a>            <span class="st">"ret_excess"</span>: rng.normal(<span class="fl">0.0</span>, <span class="fl">0.02</span>, n_firms <span class="op">*</span> n_days),</span>
-<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a>            <span class="st">"mkt_excess"</span>: rng.normal(<span class="fl">0.0</span>, <span class="fl">0.02</span>, n_firms <span class="op">*</span> n_days),</span>
-<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a>        }</span>
-<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a>    ).sort(<span class="st">"firm_id"</span>, <span class="st">"date"</span>)</span>
-<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a>    df.write_parquet(path)</span>
-<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> path</span>
-<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-29"><a href="#cb2-29" aria-hidden="true" tabindex="-1"></a>path <span class="op">=</span> write_synth_parquet(<span class="st">"synthetic.parquet"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-</div>
-<p>This <code>build_results_lz()</code> function builds the lazy query for Polars.</p>
-<div id="9472c847" class="cell" data-execution_count="3">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> build_results_lz(min_obs: <span class="bu">int</span> <span class="op">=</span> <span class="dv">1000</span>) <span class="op">-&gt;</span> pl.LazyFrame:</span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> (</span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>        pl.scan_parquet(<span class="st">"synthetic.parquet"</span>)</span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>        .group_by_dynamic(</span>
-<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>            <span class="st">"date"</span>,</span>
-<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>            every<span class="op">=</span><span class="st">"1mo"</span>,</span>
-<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>            period<span class="op">=</span><span class="st">"60mo"</span>,</span>
-<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>            offset<span class="op">=</span><span class="st">"-60mo"</span>,</span>
-<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>            group_by<span class="op">=</span><span class="st">"firm_id"</span>,</span>
-<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>            closed<span class="op">=</span><span class="st">"left"</span>,</span>
-<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>            label<span class="op">=</span><span class="st">"right"</span>,</span>
-<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>        )</span>
-<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>        .agg(</span>
-<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>            beta<span class="op">=</span>pl.cov(<span class="st">"mkt_excess"</span>, <span class="st">"ret_excess"</span>) <span class="op">/</span> pl.col(<span class="st">"mkt_excess"</span>).var(),</span>
-<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>            mean_ret<span class="op">=</span>pl.col(<span class="st">"ret_excess"</span>).mean(),</span>
-<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>            mean_mkt<span class="op">=</span>pl.col(<span class="st">"mkt_excess"</span>).mean(),</span>
-<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>            n<span class="op">=</span>pl.<span class="bu">len</span>(),</span>
-<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>        )</span>
-<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>        .<span class="bu">filter</span>(pl.col(<span class="st">"n"</span>) <span class="op">&gt;=</span> min_obs)</span>
-<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a>    )</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-</div>
-<p>This <code>collect_polars()</code> function actually executes the Polars query.</p>
-<div id="9a69bd3e" class="cell" data-execution_count="4">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> collect_polars(min_obs: <span class="bu">int</span> <span class="op">=</span> <span class="dv">1000</span>) <span class="op">-&gt;</span> pl.DataFrame:</span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> (</span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>        build_results_lz(min_obs)</span>
-<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>        .collect()</span>
-<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>    )</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-</div>
-<p>Here is the equivalent query in DuckDB:</p>
-<div id="4dfdb0ba" class="cell" data-execution_count="5">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb5"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> run_duckdb(min_obs: <span class="bu">int</span> <span class="op">=</span> <span class="dv">1000</span>) <span class="op">-&gt;</span> pl.DataFrame:</span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>    con <span class="op">=</span> duckdb.<span class="ex">connect</span>()</span>
-<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>    query <span class="op">=</span> <span class="ss">f"""</span></span>
-<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="ss">        SELECT</span></span>
-<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="ss">            firm_id,</span></span>
-<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a><span class="ss">            date,</span></span>
-<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a><span class="ss">            covar_pop(mkt_excess, ret_excess) OVER w</span></span>
-<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a><span class="ss">                / var_pop(mkt_excess) OVER w AS beta,</span></span>
-<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a><span class="ss">            avg(ret_excess) OVER w AS mean_ret,</span></span>
-<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a><span class="ss">            avg(mkt_excess) OVER w AS mean_mkt,</span></span>
-<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a><span class="ss">            count(*) OVER w AS n</span></span>
-<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a><span class="ss">        FROM 'synthetic.parquet'</span></span>
-<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a><span class="ss">        WINDOW w AS (</span></span>
-<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a><span class="ss">            PARTITION BY firm_id</span></span>
-<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a><span class="ss">            ORDER BY date</span></span>
-<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a><span class="ss">            RANGE BETWEEN INTERVAL 60 MONTH PRECEDING AND INTERVAL 1 DAY PRECEDING</span></span>
-<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a><span class="ss">        )</span></span>
-<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a><span class="ss">        QUALIFY</span></span>
-<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a><span class="ss">            date = date_trunc('month', date)</span></span>
-<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a><span class="ss">                    AND count(*) OVER w &gt;= </span><span class="sc">{</span>min_obs<span class="sc">}</span></span>
-<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a><span class="ss">        ORDER BY firm_id, date</span></span>
-<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a><span class="ss">    """</span></span>
-<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> con.sql(query).pl()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-</div>
-<p>` Here I analyze the lazy query from above.</p>
-<div id="81c05a61" class="cell" data-execution_count="6">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb6"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>results_lz <span class="op">=</span> build_results_lz()</span>
-<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>results_lz.show_graph(engine<span class="op">=</span><span class="st">"streaming"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<div class="cell-output cell-output-display">
-<div>
-<figure class="figure">
-<p><img src="analysis_files/figure-html/cell-7-output-1.svg" class="img-fluid figure-img"></p>
-</figure>
-</div>
-</div>
-</div>
-<p>And here I run the query.</p>
-<div id="8e800f21" class="cell" data-execution_count="7">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb7"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>results_pl <span class="op">=</span> results_lz.collect()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-</div>
-<p>Here’s the resulting data frame from the Polars code.</p>
-<div id="33fbbfda" class="cell" data-execution_count="8">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb8"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>results_pl</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<div class="cell-output cell-output-display" data-execution_count="8">
-<div><style>
-.dataframe > thead > tr,
-.dataframe > tbody > tr {
-  text-align: right;
-  white-space: pre-wrap;
-}
-</style>
-<small>shape: (770_000, 6)</small>
-<table class="dataframe caption-top table table-sm table-striped small" data-border="1">
-<thead>
-<tr class="header">
-<th data-quarto-table-cell-role="th">firm_id</th>
-<th data-quarto-table-cell-role="th">date</th>
-<th data-quarto-table-cell-role="th">beta</th>
-<th data-quarto-table-cell-role="th">mean_ret</th>
-<th data-quarto-table-cell-role="th">mean_mkt</th>
-<th data-quarto-table-cell-role="th">n</th>
-</tr>
-<tr class="even">
-<td>i32</td>
-<td>date</td>
-<td>f64</td>
-<td>f64</td>
-<td>f64</td>
-<td>u32</td>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td>0</td>
-<td>2002-10-01</td>
-<td>-0.039092</td>
-<td>-0.000918</td>
-<td>0.000849</td>
-<td>1004</td>
-</tr>
-<tr class="even">
-<td>0</td>
-<td>2002-11-01</td>
-<td>-0.033704</td>
-<td>-0.000958</td>
-<td>0.000822</td>
-<td>1035</td>
-</tr>
-<tr class="odd">
-<td>0</td>
-<td>2002-12-01</td>
-<td>-0.040931</td>
-<td>-0.000945</td>
-<td>0.000837</td>
-<td>1065</td>
-</tr>
-<tr class="even">
-<td>0</td>
-<td>2003-01-01</td>
-<td>-0.044087</td>
-<td>-0.000878</td>
-<td>0.000795</td>
-<td>1096</td>
-</tr>
-<tr class="odd">
-<td>0</td>
-<td>2003-02-01</td>
-<td>-0.042791</td>
-<td>-0.000677</td>
-<td>0.000739</td>
-<td>1127</td>
-</tr>
-<tr class="even">
-<td>…</td>
-<td>…</td>
-<td>…</td>
-<td>…</td>
-<td>…</td>
-<td>…</td>
-</tr>
-<tr class="odd">
-<td>9999</td>
-<td>2008-10-01</td>
-<td>0.070324</td>
-<td>-0.000556</td>
-<td>-0.000305</td>
-<td>1131</td>
-</tr>
-<tr class="even">
-<td>9999</td>
-<td>2008-11-01</td>
-<td>0.066293</td>
-<td>-0.000484</td>
-<td>-0.00019</td>
-<td>1100</td>
-</tr>
-<tr class="odd">
-<td>9999</td>
-<td>2008-12-01</td>
-<td>0.07572</td>
-<td>-0.000493</td>
-<td>-0.00027</td>
-<td>1070</td>
-</tr>
-<tr class="even">
-<td>9999</td>
-<td>2009-01-01</td>
-<td>0.078804</td>
-<td>-0.000559</td>
-<td>-0.000316</td>
-<td>1039</td>
-</tr>
-<tr class="odd">
-<td>9999</td>
-<td>2009-02-01</td>
-<td>0.082845</td>
-<td>-0.000671</td>
-<td>-0.000187</td>
-<td>1008</td>
-</tr>
-</tbody>
-</table>
-</div>
-</div>
-</div>
-<p>Next I run the DuckDB query.</p>
-<div id="bacad073" class="cell" data-execution_count="9">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb9"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>results_db <span class="op">=</span> run_duckdb()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<div class="cell-output cell-output-display">
-<script type="application/vnd.jupyter.widget-view+json">
-{"model_id":"10334695fb9d4efc94fc86a5fdf2385b","version_major":2,"version_minor":0,"quarto_mimetype":"application/vnd.jupyter.widget-view+json"}
-</script>
-</div>
-</div>
-<p>Here’s the resulting data frame from the DuckDB code.</p>
-<div id="e2702d9c" class="cell" data-execution_count="10">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb10"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>results_db</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<div class="cell-output cell-output-display" data-execution_count="10">
-<div><style>
-.dataframe > thead > tr,
-.dataframe > tbody > tr {
-  text-align: right;
-  white-space: pre-wrap;
-}
-</style>
-<small>shape: (500_000, 6)</small>
-<table class="dataframe caption-top table table-sm table-striped small" data-border="1">
-<thead>
-<tr class="header">
-<th data-quarto-table-cell-role="th">firm_id</th>
-<th data-quarto-table-cell-role="th">date</th>
-<th data-quarto-table-cell-role="th">beta</th>
-<th data-quarto-table-cell-role="th">mean_ret</th>
-<th data-quarto-table-cell-role="th">mean_mkt</th>
-<th data-quarto-table-cell-role="th">n</th>
-</tr>
-<tr class="even">
-<td>i32</td>
-<td>date</td>
-<td>f64</td>
-<td>f64</td>
-<td>f64</td>
-<td>i64</td>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td>0</td>
-<td>2002-10-01</td>
-<td>-0.039092</td>
-<td>-0.000918</td>
-<td>0.000849</td>
-<td>1004</td>
-</tr>
-<tr class="even">
-<td>0</td>
-<td>2002-11-01</td>
-<td>-0.033704</td>
-<td>-0.000958</td>
-<td>0.000822</td>
-<td>1035</td>
-</tr>
-<tr class="odd">
-<td>0</td>
-<td>2002-12-01</td>
-<td>-0.040931</td>
-<td>-0.000945</td>
-<td>0.000837</td>
-<td>1065</td>
-</tr>
-<tr class="even">
-<td>0</td>
-<td>2003-01-01</td>
-<td>-0.044087</td>
-<td>-0.000878</td>
-<td>0.000795</td>
-<td>1096</td>
-</tr>
-<tr class="odd">
-<td>0</td>
-<td>2003-02-01</td>
-<td>-0.042791</td>
-<td>-0.000677</td>
-<td>0.000739</td>
-<td>1127</td>
-</tr>
-<tr class="even">
-<td>…</td>
-<td>…</td>
-<td>…</td>
-<td>…</td>
-<td>…</td>
-<td>…</td>
-</tr>
-<tr class="odd">
-<td>9999</td>
-<td>2006-07-01</td>
-<td>0.039539</td>
-<td>0.000262</td>
-<td>-0.000519</td>
-<td>1826</td>
-</tr>
-<tr class="even">
-<td>9999</td>
-<td>2006-08-01</td>
-<td>0.042314</td>
-<td>0.000252</td>
-<td>-0.000535</td>
-<td>1826</td>
-</tr>
-<tr class="odd">
-<td>9999</td>
-<td>2006-09-01</td>
-<td>0.04111</td>
-<td>0.000113</td>
-<td>-0.000553</td>
-<td>1826</td>
-</tr>
-<tr class="even">
-<td>9999</td>
-<td>2006-10-01</td>
-<td>0.043062</td>
-<td>0.000111</td>
-<td>-0.00053</td>
-<td>1826</td>
-</tr>
-<tr class="odd">
-<td>9999</td>
-<td>2006-11-01</td>
-<td>0.04825</td>
-<td>0.000081</td>
-<td>-0.000481</td>
-<td>1826</td>
-</tr>
-</tbody>
-</table>
-</div>
-</div>
-</div>
-<p>I merge the two sets of results to confirm that they are (essentially) identical.</p>
-<div id="d2c922c6" class="cell" data-execution_count="11">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb11"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> polars.selectors <span class="im">as</span> cs</span>
-<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>joined <span class="op">=</span> (</span>
-<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>    results_db</span>
-<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>    .join(</span>
-<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a>        results_pl,</span>
-<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a>        on<span class="op">=</span>[<span class="st">"firm_id"</span>, <span class="st">"date"</span>],</span>
-<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a>        suffix<span class="op">=</span><span class="st">"_right"</span>,</span>
-<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a>    )</span>
-<span id="cb11-10"><a href="#cb11-10" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-</div>
-<p>From the following, we can see that Polars and DuckDB are producing the same results (up to machine precision).</p>
-<div id="fd77d409" class="cell" data-execution_count="12">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb12"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a>diff_summary <span class="op">=</span> (</span>
-<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>    joined</span>
-<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>    .select([</span>
-<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>        (pl.col(c) <span class="op">-</span> pl.col(<span class="ss">f"</span><span class="sc">{</span>c<span class="sc">}</span><span class="ss">_right"</span>)).<span class="bu">abs</span>().<span class="bu">max</span>().alias(<span class="ss">f"</span><span class="sc">{</span>c<span class="sc">}</span><span class="ss">_max_abs_diff"</span>)</span>
-<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>        <span class="cf">for</span> c <span class="kw">in</span> joined.select(</span>
-<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>            cs.exclude(<span class="st">"firm_id"</span>, <span class="st">"date"</span>, cs.ends_with(<span class="st">"_right"</span>))</span>
-<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>        ).columns</span>
-<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a>    ])</span>
-<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb12-10"><a href="#cb12-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb12-11"><a href="#cb12-11" aria-hidden="true" tabindex="-1"></a>diff_summary</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<div class="cell-output cell-output-display" data-execution_count="12">
-<div><style>
-.dataframe > thead > tr,
-.dataframe > tbody > tr {
-  text-align: right;
-  white-space: pre-wrap;
-}
-</style>
-<small>shape: (1, 4)</small>
-<table class="dataframe caption-top table table-sm table-striped small" data-border="1">
-<thead>
-<tr class="header">
-<th data-quarto-table-cell-role="th">beta_max_abs_diff</th>
-<th data-quarto-table-cell-role="th">mean_ret_max_abs_diff</th>
-<th data-quarto-table-cell-role="th">mean_mkt_max_abs_diff</th>
-<th data-quarto-table-cell-role="th">n_max_abs_diff</th>
-</tr>
-<tr class="even">
-<td>f64</td>
-<td>f64</td>
-<td>f64</td>
-<td>i64</td>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td>4.7184e-16</td>
-<td>1.3010e-18</td>
-<td>1.5179e-18</td>
-<td>0</td>
-</tr>
-</tbody>
-</table>
-</div>
-</div>
-</div>
+<p>Several months ago, I wrote a Polars query to estimate 60-month betas for each firm and month from daily stock-return data. It divides the covariance of market and firm returns by the market-return variance. The original query used over 80 GB before failing on my Mac mini M4 Pro, which has 24 GiB RAM. I moved it to DuckDB.</p>
+<p>Polars 2.1 did not resolve the memory issue by itself. Its unmodified covariance/correlation path still expands overlapping windows into large lists. A candidate patch, now compiled and tested, avoids that expansion for the multi-input aggregation path and for the direct <code>cov_alt()</code> formula. On the original 25-million-row synthetic beta query, it reduced footprint from about <strong>24.45 GiB to 1.96 GiB</strong>, with <strong>bit-for-bit identical results</strong>.</p>
+<section id="the-original-query" class="level2">
+<h2 class="anchored" data-anchor-id="the-original-query">The original query</h2>
+<p>The query originated in the <a href="https://www.tidy-finance.org/python/beta-estimation.html#estimating-beta-using-daily-returns">Tidy Finance beta-estimation example</a>. My <a href="https://github.com/iangow/polars-analysis/blob/16de251e5e5878568f19e775308ede2ec09b47bb/analysis.qmd">original analysis source</a> contains the earlier generator and benchmark.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> polars <span class="im">as</span> pl</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> build_results_lz(min_obs: <span class="bu">int</span> <span class="op">=</span> <span class="dv">1000</span>) <span class="op">-&gt;</span> pl.LazyFrame:</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> (</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>        pl.scan_parquet(<span class="st">"synthetic.parquet"</span>)</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>        .group_by_dynamic(</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>            <span class="st">"date"</span>,</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>            every<span class="op">=</span><span class="st">"1mo"</span>,</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>            period<span class="op">=</span><span class="st">"60mo"</span>,</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>            offset<span class="op">=</span><span class="st">"-60mo"</span>,</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>            group_by<span class="op">=</span><span class="st">"firm_id"</span>,</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>            closed<span class="op">=</span><span class="st">"left"</span>,</span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>            label<span class="op">=</span><span class="st">"right"</span>,</span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>        )</span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>        .agg(</span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>            beta<span class="op">=</span>pl.cov(<span class="st">"mkt_excess"</span>, <span class="st">"ret_excess"</span>) <span class="op">/</span> pl.col(<span class="st">"mkt_excess"</span>).var(),</span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a>            mean_ret<span class="op">=</span>pl.col(<span class="st">"ret_excess"</span>).mean(),</span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>            mean_mkt<span class="op">=</span>pl.col(<span class="st">"mkt_excess"</span>).mean(),</span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a>            n<span class="op">=</span>pl.<span class="bu">len</span>(),</span>
+<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a>        )</span>
+<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a>        .<span class="bu">filter</span>(pl.col(<span class="st">"n"</span>) <span class="op">&gt;=</span> min_obs)</span>
+<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-24"><a href="#cb1-24" aria-hidden="true" tabindex="-1"></a>results <span class="op">=</span> build_results_lz().collect()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>The existing synthetic input has 10,000 firms × 2,500 days = 25,000,000 rows. It was reused for the before/after check. Input SHA-256: <code>42a4f6fc9747e2636c51e7de06b62433a3a0d0b7e6e922dd3159f38666712309</code>.</p>
 </section>
-<section id="benchmark" class="level2">
-<h2 class="anchored" data-anchor-id="benchmark">Benchmark</h2>
-<p>Here’s some code to run benchmark analysis.</p>
-<div id="53709a21" class="cell" data-execution_count="13">
-<details class="code-fold">
-<summary>Show code</summary>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb13"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> run_benchmark(name: <span class="bu">str</span>, fn, <span class="op">*</span>helpers) <span class="op">-&gt;</span> <span class="bu">dict</span>:</span>
-<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>    helper_sources <span class="op">=</span> <span class="st">"</span><span class="ch">\n\n</span><span class="st">"</span>.join(inspect.getsource(helper) <span class="cf">for</span> helper <span class="kw">in</span> helpers)</span>
-<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>    fn_source <span class="op">=</span> inspect.getsource(fn)</span>
-<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a>    runner <span class="op">=</span> <span class="ss">f"""</span></span>
-<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a><span class="ss">import duckdb</span></span>
-<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a><span class="ss">import json</span></span>
-<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a><span class="ss">import polars as pl</span></span>
-<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a><span class="ss">import resource</span></span>
-<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a><span class="ss">import time</span></span>
-<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb13-11"><a href="#cb13-11" aria-hidden="true" tabindex="-1"></a><span class="sc">{</span>helper_sources<span class="sc">}</span></span>
-<span id="cb13-12"><a href="#cb13-12" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb13-13"><a href="#cb13-13" aria-hidden="true" tabindex="-1"></a><span class="sc">{</span>fn_source<span class="sc">}</span></span>
-<span id="cb13-14"><a href="#cb13-14" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb13-15"><a href="#cb13-15" aria-hidden="true" tabindex="-1"></a><span class="ss">start = time.perf_counter()</span></span>
-<span id="cb13-16"><a href="#cb13-16" aria-hidden="true" tabindex="-1"></a><span class="ss">results = </span><span class="sc">{</span>fn<span class="sc">.</span><span class="va">__name__</span><span class="sc">}</span><span class="ss">()</span></span>
-<span id="cb13-17"><a href="#cb13-17" aria-hidden="true" tabindex="-1"></a><span class="ss">elapsed_seconds = time.perf_counter() - start</span></span>
-<span id="cb13-18"><a href="#cb13-18" aria-hidden="true" tabindex="-1"></a><span class="ss">peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss</span></span>
-<span id="cb13-19"><a href="#cb13-19" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb13-20"><a href="#cb13-20" aria-hidden="true" tabindex="-1"></a><span class="ss">print(json.dumps(</span><span class="ch">{{</span></span>
-<span id="cb13-21"><a href="#cb13-21" aria-hidden="true" tabindex="-1"></a><span class="ss">    "name": </span><span class="sc">{</span>name<span class="sc">!r}</span><span class="ss">,</span></span>
-<span id="cb13-22"><a href="#cb13-22" aria-hidden="true" tabindex="-1"></a><span class="ss">    "elapsed_seconds": elapsed_seconds,</span></span>
-<span id="cb13-23"><a href="#cb13-23" aria-hidden="true" tabindex="-1"></a><span class="ss">    "peak_rss_bytes": peak_rss,</span></span>
-<span id="cb13-24"><a href="#cb13-24" aria-hidden="true" tabindex="-1"></a><span class="ch">}}</span><span class="ss">))</span></span>
-<span id="cb13-25"><a href="#cb13-25" aria-hidden="true" tabindex="-1"></a><span class="ss">"""</span></span>
-<span id="cb13-26"><a href="#cb13-26" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb13-27"><a href="#cb13-27" aria-hidden="true" tabindex="-1"></a>    proc <span class="op">=</span> subprocess.run(</span>
-<span id="cb13-28"><a href="#cb13-28" aria-hidden="true" tabindex="-1"></a>        [sys.executable, <span class="st">"-c"</span>, runner],</span>
-<span id="cb13-29"><a href="#cb13-29" aria-hidden="true" tabindex="-1"></a>        check<span class="op">=</span><span class="va">True</span>,</span>
-<span id="cb13-30"><a href="#cb13-30" aria-hidden="true" tabindex="-1"></a>        capture_output<span class="op">=</span><span class="va">True</span>,</span>
-<span id="cb13-31"><a href="#cb13-31" aria-hidden="true" tabindex="-1"></a>        text<span class="op">=</span><span class="va">True</span>,</span>
-<span id="cb13-32"><a href="#cb13-32" aria-hidden="true" tabindex="-1"></a>    )</span>
-<span id="cb13-33"><a href="#cb13-33" aria-hidden="true" tabindex="-1"></a>    stdout_lines <span class="op">=</span> [line <span class="cf">for</span> line <span class="kw">in</span> proc.stdout.splitlines() <span class="cf">if</span> line.strip()]</span>
-<span id="cb13-34"><a href="#cb13-34" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="kw">not</span> stdout_lines:</span>
-<span id="cb13-35"><a href="#cb13-35" aria-hidden="true" tabindex="-1"></a>        <span class="cf">raise</span> <span class="pp">RuntimeError</span>(<span class="ss">f"</span><span class="sc">{</span>name<span class="sc">}</span><span class="ss"> benchmark produced no stdout"</span>)</span>
-<span id="cb13-36"><a href="#cb13-36" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> json.loads(stdout_lines[<span class="op">-</span><span class="dv">1</span>])</span>
-<span id="cb13-37"><a href="#cb13-37" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb13-38"><a href="#cb13-38" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb13-39"><a href="#cb13-39" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> benchmark_table(<span class="op">*</span>benchmarks: <span class="bu">dict</span>) <span class="op">-&gt;</span> pl.DataFrame:</span>
-<span id="cb13-40"><a href="#cb13-40" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> (</span>
-<span id="cb13-41"><a href="#cb13-41" aria-hidden="true" tabindex="-1"></a>        pl.DataFrame(benchmarks)</span>
-<span id="cb13-42"><a href="#cb13-42" aria-hidden="true" tabindex="-1"></a>        .with_columns(</span>
-<span id="cb13-43"><a href="#cb13-43" aria-hidden="true" tabindex="-1"></a>            elapsed_ms<span class="op">=</span>(pl.col(<span class="st">"elapsed_seconds"</span>) <span class="op">*</span> <span class="dv">1000</span>).<span class="bu">round</span>(<span class="dv">2</span>),</span>
-<span id="cb13-44"><a href="#cb13-44" aria-hidden="true" tabindex="-1"></a>            peak_rss_mb<span class="op">=</span>(pl.col(<span class="st">"peak_rss_bytes"</span>) <span class="op">/</span> (<span class="dv">1024</span> <span class="op">*</span> <span class="dv">1024</span>)).<span class="bu">round</span>(<span class="dv">2</span>),</span>
-<span id="cb13-45"><a href="#cb13-45" aria-hidden="true" tabindex="-1"></a>        )</span>
-<span id="cb13-46"><a href="#cb13-46" aria-hidden="true" tabindex="-1"></a>        .select(<span class="st">"name"</span>, <span class="st">"elapsed_seconds"</span>, <span class="st">"elapsed_ms"</span>, <span class="st">"peak_rss_bytes"</span>, <span class="st">"peak_rss_mb"</span>)</span>
-<span id="cb13-47"><a href="#cb13-47" aria-hidden="true" tabindex="-1"></a>        .sort(<span class="st">"elapsed_seconds"</span>)</span>
-<span id="cb13-48"><a href="#cb13-48" aria-hidden="true" tabindex="-1"></a>    )</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-</details>
-</div>
-<p>And here’s the benchmark analysis.</p>
-<div id="ed0171a0" class="cell" data-execution_count="14">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb14"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a>polars_collect_benchmark <span class="op">=</span> run_benchmark(</span>
-<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>    <span class="st">"polars_collect"</span>,</span>
-<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>    collect_polars,</span>
-<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>    build_results_lz,</span>
-<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a>duckdb_benchmark <span class="op">=</span> run_benchmark(<span class="st">"duckdb_window"</span>, run_duckdb)</span>
-<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a>benchmark_table(polars_collect_benchmark, duckdb_benchmark)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<div class="cell-output cell-output-display" data-execution_count="14">
-<div><style>
-.dataframe > thead > tr,
-.dataframe > tbody > tr {
-  text-align: right;
-  white-space: pre-wrap;
-}
-</style>
-<small>shape: (2, 5)</small>
-<table class="dataframe caption-top table table-sm table-striped small" data-border="1">
+<section id="full-size-results-with-matching-windows" class="level2">
+<h2 class="anchored" data-anchor-id="full-size-results-with-matching-windows">Full-size results with matching windows</h2>
+<table class="caption-top table">
 <thead>
 <tr class="header">
-<th data-quarto-table-cell-role="th">name</th>
-<th data-quarto-table-cell-role="th">elapsed_seconds</th>
-<th data-quarto-table-cell-role="th">elapsed_ms</th>
-<th data-quarto-table-cell-role="th">peak_rss_bytes</th>
-<th data-quarto-table-cell-role="th">peak_rss_mb</th>
-</tr>
-<tr class="even">
-<td>str</td>
-<td>f64</td>
-<td>f64</td>
-<td>i64</td>
-<td>f64</td>
+<th>Query</th>
+<th style="text-align: right;">Seconds</th>
+<th style="text-align: right;">Peak RSS, GiB</th>
+<th style="text-align: right;">Peak total footprint, GiB</th>
+<th style="text-align: right;">Rows</th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td>"duckdb_window"</td>
-<td>5.484154</td>
-<td>5484.15</td>
-<td>2653814784</td>
-<td>2530.88</td>
+<td>Released Polars 2.1, earlier run</td>
+<td style="text-align: right;">164.76</td>
+<td style="text-align: right;">4.18</td>
+<td style="text-align: right;">24.45</td>
+<td style="text-align: right;">770,000</td>
 </tr>
 <tr class="even">
-<td>"polars_collect"</td>
-<td>89.410132</td>
-<td>89410.13</td>
-<td>9276981248</td>
-<td>8847.22</td>
+<td>Patched Polars 2.1</td>
+<td style="text-align: right;">1.59</td>
+<td style="text-align: right;">2.01</td>
+<td style="text-align: right;">1.96</td>
+<td style="text-align: right;">770,000</td>
+</tr>
+<tr class="odd">
+<td>Patched Polars 2.1, cov_alt beta</td>
+<td style="text-align: right;">2.79</td>
+<td style="text-align: right;">2.13</td>
+<td style="text-align: right;">2.09</td>
+<td style="text-align: right;">770,000</td>
+</tr>
+<tr class="even">
+<td>DuckDB 1.5.1, aligned windows</td>
+<td style="text-align: right;">7.39</td>
+<td style="text-align: right;">2.16</td>
+<td style="text-align: right;">2.04</td>
+<td style="text-align: right;">770,000</td>
 </tr>
 </tbody>
 </table>
-</div>
-</div>
-</div>
+<p>All full-size outputs have the same 770,000 firm/date keys and observation counts. The patched and unmodified Polars results for the built-in covariance formula are exactly equal, including every floating-point value. The maximum beta difference versus DuckDB is 3.33e-16.</p>
+<p>The full-size <code>cov_alt()</code> beta query completed in 2.79 seconds with 2.09 GiB peak footprint. All 770,000 output rows, including floating-point bits, match released Polars run in 20 complete-firm partitions of 500 firms each. Every observation for a firm stays in its partition, so the reference retains each window’s data. The patched measurement runs the entire input in one process. The partitioned reference is a correctness check; its timings are not presented as a whole-query benchmark.</p>
+<p>These full-size timings are single observations. The earlier released Polars run exceeded physical RAM and was sensitive to compression, paging and machine activity. The local build also uses thin LTO, while the official wheel uses fat LTO. Those are limits on attributing the exact runtime ratio to the patch. The large memory reduction is the principal result.</p>
+<section id="aligning-duckdb-with-polars" class="level3">
+<h3 class="anchored" data-anchor-id="aligning-duckdb-with-polars">Aligning DuckDB with Polars</h3>
+<p>The DuckDB comparison now evaluates the same window-label grid as Polars. Per firm, it generates monthly labels through 60 months after the last input month, appends null-valued evaluation rows, and evaluates the same half-open 60-month intervals. <code>count(observation)</code> counts real input rows, so evaluation rows affect neither observation counts nor covariance. The only output threshold is <code>n &gt;= 1000</code>, in both engines. No last-input-date filter is added to Polars.</p>
+<p>This gives 77,000 rows in each smaller reproducer and 770,000 rows in each original full-size result, including the later labels produced by Polars. A separate smoke check also passed with weekday-only observations and null values. The earlier SQL that retained only dates present in the input is retained as historical provenance, not used as the current comparator.</p>
+<p>The smaller reproducer uses this SQL for covariance:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode sql code-with-copy"><code class="sourceCode sql"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">WITH</span> observations <span class="kw">AS</span> (</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">SELECT</span> firm_id, <span class="dt">date</span>, x, y <span class="kw">FROM</span> <span class="st">'synthetic.parquet'</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>), bounds <span class="kw">AS</span> (</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">SELECT</span> firm_id,</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>           date_trunc(<span class="st">'month'</span>, <span class="fu">min</span>(<span class="dt">date</span>)) <span class="op">+</span> <span class="dt">INTERVAL</span> <span class="dv">1</span> <span class="dt">MONTH</span> <span class="kw">AS</span> first_label,</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>           date_trunc(<span class="st">'month'</span>, <span class="fu">max</span>(<span class="dt">date</span>)) <span class="op">+</span> <span class="dt">INTERVAL</span> <span class="dv">60</span> <span class="dt">MONTH</span> <span class="kw">AS</span> last_label</span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">FROM</span> observations <span class="kw">GROUP</span> <span class="kw">BY</span> firm_id</span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>), evaluation_points <span class="kw">AS</span> (</span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">SELECT</span> firm_id,</span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>           unnest(generate_series(first_label, last_label, <span class="dt">INTERVAL</span> <span class="dv">1</span> <span class="dt">MONTH</span>)):<span class="ch">:DATE</span> <span class="kw">AS</span> <span class="dt">date</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">FROM</span> bounds</span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>), window_input <span class="kw">AS</span> (</span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>    <span class="kw">SELECT</span> firm_id, <span class="dt">date</span>, x, y, <span class="dv">1</span> <span class="kw">AS</span> observation, <span class="kw">false</span> <span class="kw">AS</span> is_evaluation</span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>    <span class="kw">FROM</span> observations</span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">UNION</span> <span class="kw">ALL</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>    <span class="kw">SELECT</span> firm_id, <span class="dt">date</span>, <span class="kw">NULL</span>:<span class="ch">:DOUBLE</span>, <span class="kw">NULL</span>:<span class="ch">:DOUBLE</span>, <span class="kw">NULL</span>:<span class="ch">:INTEGER</span>, <span class="kw">true</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>    <span class="kw">FROM</span> evaluation_points</span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> firm_id, <span class="dt">date</span>, <span class="fu">covar_samp</span>(x, y) <span class="kw">OVER</span> w <span class="kw">AS</span> <span class="fu">value</span>,</span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a>       <span class="fu">count</span>(observation) <span class="kw">OVER</span> w <span class="kw">AS</span> n</span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a><span class="kw">FROM</span> window_input</span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a>WINDOW w <span class="kw">AS</span> (</span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a>    <span class="kw">PARTITION</span> <span class="kw">BY</span> firm_id <span class="kw">ORDER</span> <span class="kw">BY</span> <span class="dt">date</span></span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a>    <span class="kw">RANGE</span> <span class="kw">BETWEEN</span> <span class="dt">INTERVAL</span> <span class="dv">60</span> <span class="dt">MONTH</span> <span class="kw">PRECEDING</span></span>
+<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a>              <span class="kw">AND</span> <span class="dt">INTERVAL</span> <span class="dv">1</span> <span class="dt">DAY</span> <span class="kw">PRECEDING</span></span>
+<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a>QUALIFY is_evaluation <span class="kw">AND</span> <span class="fu">count</span>(observation) <span class="kw">OVER</span> w <span class="op">&gt;=</span> <span class="dv">1000</span></span>
+<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a><span class="kw">ORDER</span> <span class="kw">BY</span> firm_id, <span class="dt">date</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>The original full-size comparison uses the same grid and frame, with covariance divided by market-return variance and the two means added to the output.</p>
+</section>
+</section>
+<section id="a-self-contained-synthetic-reproducer" class="level2">
+<h2 class="anchored" data-anchor-id="a-self-contained-synthetic-reproducer">A self-contained synthetic reproducer</h2>
+<p>The <a href="reproducer/minimal.py">minimal example</a> generates 1,000 firms × 2,500 calendar days = 2,500,000 rows: <strong>57.22 MiB uncompressed input</strong>. The x and y values are deterministic trigonometric functions. No financial data, credentials, external files or NumPy installation are needed.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode sh code-with-copy"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run <span class="at">--no-project</span> minimal.py cov</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run <span class="at">--no-project</span> minimal.py cov-alt</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run <span class="at">--no-project</span> minimal.py self-cov</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run <span class="at">--no-project</span> minimal.py var</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run <span class="at">--no-project</span> minimal.py corr</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run <span class="at">--no-project</span> minimal.py mean</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>The <a href="reproducer/repro.py">runner</a> tests additional aggregates and formulas, including cases motivated by <a href="https://iangow.github.io/era_pl_book/">my book</a>: the direct covariance formula in <a href="https://iangow.github.io/era_pl_book/py-intro.html">the basics chapter</a> and grouped beta/alpha estimation in <a href="https://iangow.github.io/era_pl_book/ffjr.html">FFJR</a>.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode sh code-with-copy"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run <span class="at">--no-project</span> repro.py <span class="at">--sweep</span> <span class="at">--book-cases</span> <span class="at">--output</span> repro-results <span class="at">--verbose</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="released-wheel-and-compiled-patch" class="level2">
+<h2 class="anchored" data-anchor-id="released-wheel-and-compiled-patch">Released wheel and compiled patch</h2>
+<p>These are medians of three alternating fresh-process measurements per build on the <strong>same input file</strong>, using Python 3.14.2, macOS 27.2, Apple M4 Pro and 14 Polars threads. Timing excludes imports, data generation, output serialization and validation. Memory is each fresh worker process’s peak, including its interpreter and imported libraries, captured before serialization and validation. Data generation runs separately.</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 15%">
+<col style="width: 21%">
+<col style="width: 21%">
+<col style="width: 21%">
+<col style="width: 21%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Query</th>
+<th style="text-align: right;">Released seconds</th>
+<th style="text-align: right;">Patched seconds</th>
+<th style="text-align: right;">Released footprint, GiB</th>
+<th style="text-align: right;">Patched footprint, GiB</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Covariance, streaming</td>
+<td style="text-align: right;">0.739</td>
+<td style="text-align: right;">0.181</td>
+<td style="text-align: right;">2.573</td>
+<td style="text-align: right;">0.297</td>
+</tr>
+<tr class="even">
+<td>Covariance, in-memory</td>
+<td style="text-align: right;">0.658</td>
+<td style="text-align: right;">0.159</td>
+<td style="text-align: right;">2.570</td>
+<td style="text-align: right;">0.297</td>
+</tr>
+<tr class="odd">
+<td>Covariance of x with itself</td>
+<td style="text-align: right;">0.818</td>
+<td style="text-align: right;">0.162</td>
+<td style="text-align: right;">2.519</td>
+<td style="text-align: right;">0.243</td>
+</tr>
+<tr class="even">
+<td>Pearson correlation</td>
+<td style="text-align: right;">0.786</td>
+<td style="text-align: right;">0.174</td>
+<td style="text-align: right;">2.570</td>
+<td style="text-align: right;">0.298</td>
+</tr>
+<tr class="odd">
+<td>Spearman correlation</td>
+<td style="text-align: right;">8.296</td>
+<td style="text-align: right;">7.850</td>
+<td style="text-align: right;">2.573</td>
+<td style="text-align: right;">0.298</td>
+</tr>
+<tr class="even">
+<td>FFJR beta and alpha</td>
+<td style="text-align: right;">1.922</td>
+<td style="text-align: right;">0.182</td>
+<td style="text-align: right;">4.875</td>
+<td style="text-align: right;">0.298</td>
+</tr>
+<tr class="odd">
+<td>Custom two-input aggregate</td>
+<td style="text-align: right;">2.151</td>
+<td style="text-align: right;">1.587</td>
+<td style="text-align: right;">2.573</td>
+<td style="text-align: right;">0.297</td>
+</tr>
+<tr class="even">
+<td>Book cov_alt expression</td>
+<td style="text-align: right;">2.164</td>
+<td style="text-align: right;">0.295</td>
+<td style="text-align: right;">4.892</td>
+<td style="text-align: right;">0.298</td>
+</tr>
+<tr class="odd">
+<td>Variance of x and y</td>
+<td style="text-align: right;">0.075</td>
+<td style="text-align: right;">0.077</td>
+<td style="text-align: right;">0.297</td>
+<td style="text-align: right;">0.296</td>
+</tr>
+<tr class="even">
+<td>Mean of x</td>
+<td style="text-align: right;">0.046</td>
+<td style="text-align: right;">0.067</td>
+<td style="text-align: right;">0.242</td>
+<td style="text-align: right;">0.242</td>
+</tr>
+</tbody>
+</table>
+<p>The aligned DuckDB covariance query returned the same 77,000 keys and counts, with 0.370 GiB footprint and 0.421 seconds median runtime. Its covariance values agree within 3.73e-20.</p>
+<p>The other built-in unary aggregates tested—variance, standard deviation, mean, sum, min, max, median, quantile, distinct count, skewness and kurtosis—are around 0.24 GiB. Two variances together, reading the same x and y columns as covariance, use around 0.30 GiB. <code>cov(x, x)</code> is another useful control: it computes the same statistic as variance but had a footprint around 2.52 GiB before the patch.</p>
+<p>RSS and total footprint are both recorded. On macOS, RSS can omit compressed or swapped memory; the footprint measure is <code>ri_lifetime_max_phys_footprint</code>. GiB means 2^30 bytes.</p>
+</section>
+<section id="implementation-and-tested-fix" class="level2">
+<h2 class="anchored" data-anchor-id="implementation-and-tested-fix">Implementation and tested fix</h2>
+<p>The Polars 2.1 source suggests that the memory expansion occurs before the numerical covariance kernel:</p>
+<ol type="1">
+<li>The multi-input group-aware apply path calls <code>iter_groups()</code> on each input. For an unaggregated input, that calls <code>aggregated()</code>, which calls <code>agg_list()</code>. See <a href="https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-expr/src/expressions/apply.rs#L343-L403">multi-input apply</a>, <a href="https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-expr/src/expressions/group_iter.rs#L62-L74">group iteration</a> and <a href="https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-expr/src/expressions/mod.rs#L451-L473">aggregation context</a>.</li>
+<li>For numeric slice groups, <code>agg_list()</code> appends each window’s values to a new list-values buffer. Overlapping values are therefore copied repeatedly. See <a href="https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-core/src/frame/group_by/aggregations/agg_list.rs#L91-L111">numeric list aggregation</a>.</li>
+<li>Mean and variance have specialized aggregation paths, including rolling kernels that operate on the original values and window offsets. See <a href="https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-core/src/frame/group_by/aggregations/mod.rs#L991-L1027">mean</a> and <a href="https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-core/src/frame/group_by/aggregations/mod.rs#L1056-L1090">variance</a>.</li>
+<li>The single-input apply path already has a lazy iteration branch for overlapping groups. The corresponding multi-input path does not use it. See <a href="https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-expr/src/expressions/apply.rs#L139-L150">the existing safeguard</a>. The low-level covariance function itself uses an accumulator state; it does not require all windows to be copied at once (<a href="https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-ops/src/chunked_array/cov.rs#L7-L29">kernel</a>).</li>
+</ol>
+<p>This is a static source trace, not an allocation-profiler trace. However, it also predicts the observed scale: these 2,500,000 input rows participate in 150,000,000 window memberships before the output filters. Copying two Float64 values per membership takes 2,400,000,000 bytes (2.24 GiB), before vector capacity, input columns, output arrays and other overhead. The measured footprint is about 2.57 GiB.</p>
+<p>The candidate patch has now been built against the exact Polars 2.1.0 release commit, using its pinned <code>nightly-2026-09-01</code> toolchain, default full runtime features, 32-bit indices and the optimized <code>nodebug-release</code> profile. Python was 3.14.2 throughout.</p>
+<p>The official wheel uses <code>dist-release</code> (fat LTO); the local build used thin LTO. Timings therefore include a build-profile difference. The before/after memory reduction and exact numerical comparisons are the principal checks here. Build provenance records the commit, patch hash, wheel hash and both imported native-module hashes.</p>
+<p>All 26 Polars benchmark outputs and the 240 original edge cases are bit-for-bit identical before and after the patch. The 384 additional composed-expression scenarios have identical values, null/NaN positions and non-NaN floating-point bits. Some NaN bit patterns differ between the official and local builds; the same differences were present in the earlier compiled patch. 1674 upstream tests passed. The aligned DuckDB result has the same full keys and observation counts and agrees within floating-point precision. These checks do not constitute the entire Polars test suite.</p>
+<p>The candidate extends the existing lazy overlapping-group iteration to multi-input apply when all inputs are unaggregated overlapping slice groups. Each input then yields one view of its original values per window, rather than first building the large expanded lists. The other states retain the eager path. <a href="reproducer/candidate-fix.patch">Patch</a>, <a href="reproducer/SOURCE_NOTES.md">implementation notes</a> and <a href="reproducer/BUILD.md">build instructions</a> are available.</p>
+<p>The book’s <code>cov_alt()</code> expression uses a separate <a href="https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-expr/src/expressions/binary.rs#L277-L305">binary group-aware path</a>. That path materializes the centered inputs and their product for every overlapping window. The first <code>ApplyExpr</code> patch left its footprint at about 4.89 GiB.</p>
+<p>The extended patch recognizes Float64 arithmetic over columns, column means and literals feeding a sum on the original overlapping slice groups. It computes the means through the existing aggregation kernels, then evaluates and sums one window at a time. It preserves the expression’s independent means, null handling, denominator and arithmetic order; it does not replace the expression with pairwise-complete covariance. The measured footprint is now <strong>0.298 GiB</strong>, versus <strong>4.892 GiB</strong> on released 2.1, with bit-for-bit identical output. Other expression types and group layouts retain their existing evaluation paths. This is a scoped candidate, not a general solution for every composed aggregation.</p>
+<p>A separate comparison keeps the build profile fixed: both local wheels use <code>nodebug-release</code> with thin LTO. Across three alternating fresh-process runs, <code>cov_alt()</code> changed from 1.791 seconds and 4.856 GiB with the first patch to 0.299 seconds and 0.297 GiB with the extended patch. The output is bit-for-bit identical.</p>
+</section>
+<section id="two-candidate-patches" class="level2">
+<h2 class="anchored" data-anchor-id="two-candidate-patches">Two candidate patches</h2>
+<p>Both candidate fixes change Polars’ Rust execution engine. The Python <code>cov_alt()</code> formula is unchanged.</p>
+<ul>
+<li><a href="reproducer/multi-input-apply.patch">Multi-input apply patch</a>: lazy window views for covariance, correlation and other multi-input grouped functions.</li>
+<li><a href="reproducer/composed-window-sum.patch">Composed-sum patch</a>: evaluate and sum Float64 arithmetic over columns and column means one overlapping window at a time.</li>
+<li><a href="reproducer/candidate-fix.patch">Combined patch</a>: the exact source change used for the final build and numerical validation.</li>
+</ul>
+<p>The separate patches are supplied for review. The final benchmark and regression results were recorded with both applied; the earlier multi-input-only build also provides the same-profile control.</p>
+</section>
+<section id="what-about-spilling-in-polars-2.1" class="level2">
+<h2 class="anchored" data-anchor-id="what-about-spilling-in-polars-2.1">What about spilling in Polars 2.1?</h2>
+<p>This keyed dynamic aggregation still appears as an <code>in-memory-map</code> fallback. The <a href="https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-stream/src/physical_plan/lower_group_by.rs#L1491-L1515">native streaming path requires no additional grouping keys</a>. The <a href="https://github.com/pola-rs/polars/pull/29911">new group-by spilling</a> and <a href="https://github.com/pola-rs/polars/pull/30282">window spilling</a> operate on supported streaming nodes. The tested fix reduces covariance/correlation memory within the existing fallback; it does not add a streaming operator.</p>
+</section>
+<section id="files-and-checks" class="level2">
+<h2 class="anchored" data-anchor-id="files-and-checks">Files and checks</h2>
+<ul>
+<li><a href="reproducer/reproducer.zip">Reproducer bundle</a>, <a href="reproducer/README.md">instructions</a> and <a href="reproducer/BUILD.md">build instructions</a>.</li>
+<li><a href="reproducer/results/measurements.json">Released measurements</a>, <a href="reproducer/results/patched-measurements.json">patched measurements</a> and <a href="reproducer/results/patch-comparison.csv">comparison CSV</a>.</li>
+<li><a href="reproducer/results/patch-validation.json">Numerical validation</a>, <a href="reproducer/results/build-provenance.json">build provenance</a> and <a href="reproducer/results/upstream-tests.txt">1674-test upstream log</a>.</li>
+</ul>
+<p>All 26 Polars benchmark outputs, 240 original edge cases and the full-size results matched bit for bit. The 384 additional composed-expression scenarios have identical values, null/NaN positions and non-NaN floating-point bits; their NaN bit-pattern differences are recorded separately. Independent DuckDB executions can differ by floating-point rounding. The patch has not been tested against the entire Polars suite. The generated data is not included in the download.</p>
 
 
 </section>
 
 </main> <!-- /main -->
-<script type="application/vnd.jupyter.widget-state+json">
-{"state":{"10334695fb9d4efc94fc86a5fdf2385b":{"model_module":"@jupyter-widgets/controls","model_module_version":"2.0.0","model_name":"FloatProgressModel","state":{"_dom_classes":[],"_model_module":"@jupyter-widgets/controls","_model_module_version":"2.0.0","_model_name":"FloatProgressModel","_view_count":null,"_view_module":"@jupyter-widgets/controls","_view_module_version":"2.0.0","_view_name":"ProgressView","bar_style":"","description":"","description_allow_html":false,"layout":"IPY_MODEL_846b4a2882c7403aa617da70a59f4646","max":100,"min":0,"orientation":"horizontal","style":"IPY_MODEL_5ac598b2b975464b97267cf384fe3207","tabbable":null,"tooltip":null,"value":100}},"5ac598b2b975464b97267cf384fe3207":{"model_module":"@jupyter-widgets/controls","model_module_version":"2.0.0","model_name":"ProgressStyleModel","state":{"_model_module":"@jupyter-widgets/controls","_model_module_version":"2.0.0","_model_name":"ProgressStyleModel","_view_count":null,"_view_module":"@jupyter-widgets/base","_view_module_version":"2.0.0","_view_name":"StyleView","bar_color":"black","description_width":""}},"846b4a2882c7403aa617da70a59f4646":{"model_module":"@jupyter-widgets/base","model_module_version":"2.0.0","model_name":"LayoutModel","state":{"_model_module":"@jupyter-widgets/base","_model_module_version":"2.0.0","_model_name":"LayoutModel","_view_count":null,"_view_module":"@jupyter-widgets/base","_view_module_version":"2.0.0","_view_name":"LayoutView","align_content":null,"align_items":null,"align_self":null,"border_bottom":null,"border_left":null,"border_right":null,"border_top":null,"bottom":null,"display":null,"flex":null,"flex_flow":null,"grid_area":null,"grid_auto_columns":null,"grid_auto_flow":null,"grid_auto_rows":null,"grid_column":null,"grid_gap":null,"grid_row":null,"grid_template_areas":null,"grid_template_columns":null,"grid_template_rows":null,"height":null,"justify_content":null,"justify_items":null,"left":null,"margin":null,"max_height":null,"max_width":null,"min_height":null,"min_width":null,"object_fit":null,"object_position":null,"order":null,"overflow":null,"padding":null,"right":null,"top":null,"visibility":null,"width":"auto"}}},"version_major":2,"version_minor":0}
-</script>
 <script id="quarto-html-after-body" type="application/javascript">
   window.document.addEventListener("DOMContentLoaded", function (event) {
     const icon = "";
@@ -821,7 +533,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
     }
       var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
       var mailtoRegex = new RegExp(/^mailto:/);
-        var filterRegex = new RegExp('/' + window.location.host + '/');
+        var filterRegex = new RegExp("https:\/\/iangow\.github\.io\/polars-analysis");
       var isInternal = (href) => {
           return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
       }

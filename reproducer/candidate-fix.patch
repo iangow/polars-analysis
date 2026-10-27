@@ -1,0 +1,328 @@
+diff --git a/crates/polars-expr/src/expressions/aggregation.rs b/crates/polars-expr/src/expressions/aggregation.rs
+index b46996e..5cd0a26 100644
+--- a/crates/polars-expr/src/expressions/aggregation.rs
++++ b/crates/polars-expr/src/expressions/aggregation.rs
+@@ -34,7 +34,144 @@ pub(crate) struct AggregationExpr {
+     pub(crate) output_field: Field,
+ }
+ 
++/// A binary expression whose leaves retain their original aggregation contexts.
++/// In particular, group means are still computed by the existing rolling kernels.
++enum GroupArithmetic {
++    Leaf(usize),
++    Binary(Box<Self>, Operator, Box<Self>),
++}
++
++impl GroupArithmetic {
++    #[recursive::recursive]
++    fn supports(expr: &dyn PhysicalExpr) -> bool {
++        if let Some((left, _, right)) = expr.as_group_arithmetic() {
++            Self::supports(left) && Self::supports(right)
++        } else {
++            expr.is_group_arithmetic_leaf()
++        }
++    }
++
++    #[recursive::recursive]
++    fn prepare<'a>(
++        expr: &dyn PhysicalExpr,
++        df: &DataFrame,
++        groups: &'a GroupPositions,
++        state: &ExecutionState,
++        leaves: &mut Vec<AggregationContext<'a>>,
++    ) -> PolarsResult<Self> {
++        if let Some((left, op, right)) = expr.as_group_arithmetic() {
++            let left = Self::prepare(left, df, groups, state, leaves)?;
++            let right = Self::prepare(right, df, groups, state, leaves)?;
++            Ok(Self::Binary(Box::new(left), op, Box::new(right)))
++        } else {
++            let idx = leaves.len();
++            leaves.push(expr.evaluate_on_groups(df, groups, state)?);
++            Ok(Self::Leaf(idx))
++        }
++    }
++
++    #[recursive::recursive]
++    fn evaluate(&self, leaves: &[Column]) -> PolarsResult<Column> {
++        match self {
++            Self::Leaf(idx) => Ok(leaves[*idx].clone()),
++            Self::Binary(left, op, right) => {
++                binary::apply_operator(&left.evaluate(leaves)?, &right.evaluate(leaves)?, *op)
++            },
++        }
++    }
++}
++
+ impl AggregationExpr {
++    /// Avoid materializing all overlapping memberships for expressions such as
++    /// `((x - x.mean()) * (y - y.mean())).sum()`. Only one window's arithmetic
++    /// intermediates are live at a time. Keep other dtypes/group layouts on the
++    /// existing path. Inspect support before evaluating leaves so that falling
++    /// back cannot evaluate a user-defined function twice.
++    fn try_sum_group_arithmetic<'a>(
++        &self,
++        df: &DataFrame,
++        groups: &'a GroupPositions,
++        state: &ExecutionState,
++    ) -> PolarsResult<Option<AggregationContext<'a>>> {
++        let GroupByMethod::Sum { null_on_empty } = self.agg_type.groupby else {
++            return Ok(None);
++        };
++        if !groups.is_overlapping()
++            || self.output_field.dtype() != &DataType::Float64
++            || self.input.as_group_arithmetic().is_none()
++            || !GroupArithmetic::supports(self.input.as_ref())
++        {
++            return Ok(None);
++        }
++
++        let mut leaves = Vec::new();
++        let expr = GroupArithmetic::prepare(self.input.as_ref(), df, groups, state, &mut leaves)?;
++        let mut has_values = false;
++        let mut has_scalar = false;
++        for ac in &mut leaves {
++            match ac.agg_state() {
++                AggState::NotAggregated(_) => {
++                    if !ac.groups().is_same(groups) {
++                        return Ok(None);
++                    }
++                    has_values = true;
++                },
++                AggState::AggregatedScalar(c) if c.len() == groups.len() => has_scalar = true,
++                AggState::LiteralScalar(c) if c.len() == 1 => {},
++                _ => return Ok(None),
++            }
++        }
++        if !(has_values && has_scalar) {
++            return Ok(None);
++        }
++
++        let mut iters: Vec<Box<dyn Iterator<Item = Option<Column>> + '_>> = leaves
++            .iter_mut()
++            .map(|ac| {
++                if matches!(ac.agg_state(), AggState::NotAggregated(_)) {
++                    Box::new(
++                        ac.iter_groups_lazy()
++                            .map(|s| s.map(IntoColumn::into_column)),
++                    ) as Box<dyn Iterator<Item = Option<Column>> + '_>
++                } else {
++                    Box::new(
++                        ac.iter_groups(false)
++                            .map(|s| s.map(|s| s.deep_clone().into_column())),
++                    )
++                }
++            })
++            .collect();
++        let mut values = Vec::with_capacity(iters.len());
++        let mut sums = PrimitiveChunkedBuilder::<Float64Type>::new(
++            self.output_field.name().clone(),
++            groups.len(),
++        );
++        for _ in 0..groups.len() {
++            values.clear();
++            for iter in &mut iters {
++                // These contexts all have exactly the original number of groups.
++                values.push(iter.next().unwrap().unwrap());
++            }
++            let value = expr.evaluate(&values)?;
++            // Use the same non-overlapping slice reduction as the materialized
++            // list path, including its empty/all-null behavior.
++            let ca = value.f64()?;
++            sums.append_option(if null_on_empty && value.null_count() == value.len() {
++                None
++            } else {
++                Some(match ca.len() {
++                    0 => 0.0,
++                    1 => ca.get(0).unwrap_or(0.0),
++                    _ => ca.sum().unwrap_or(0.0),
++                })
++            });
++        }
++        Ok(Some(AggregationContext::from_agg_state(
++            AggregatedScalar(sums.finish().into_column()),
++            Cow::Borrowed(groups),
++        )))
++    }
++
+     /// Sets the groups of `values` that contain a null to null, if the aggregation propagates
+     /// nulls.
+     ///
+@@ -63,6 +200,10 @@ impl AggregationExpr {
+ }
+ 
+ impl PhysicalExpr for AggregationExpr {
++    fn is_group_arithmetic_leaf(&self) -> bool {
++        matches!(self.agg_type.groupby, GroupByMethod::Mean) && self.input.as_column().is_some()
++    }
++
+     fn as_expression(&self) -> Option<&Expr> {
+         None
+     }
+@@ -229,6 +370,9 @@ impl PhysicalExpr for AggregationExpr {
+         groups: &'a GroupPositions,
+         state: &ExecutionState,
+     ) -> PolarsResult<AggregationContext<'a>> {
++        if let Some(ac) = self.try_sum_group_arithmetic(df, groups, state)? {
++            return Ok(ac);
++        }
+         let mut ac = self.input.evaluate_on_groups(df, groups, state)?;
+ 
+         // don't change names by aggregations as is done in polars-core
+diff --git a/crates/polars-expr/src/expressions/apply.rs b/crates/polars-expr/src/expressions/apply.rs
+index 7ec2557..2166268 100644
+--- a/crates/polars-expr/src/expressions/apply.rs
++++ b/crates/polars-expr/src/expressions/apply.rs
+@@ -351,11 +351,33 @@ impl ApplyExpr {
+         // Without groups there is no output to take the dtype of a dynamic literal from.
+         let dtype = field.dtype.clone().materialize_unknown(true)?;
+ 
+-        // Aggregate representation of the aggregation contexts,
+-        // then unpack the lists and finally create iterators from this list chunked arrays.
++        // As in apply_single_group_aware, avoid materializing every overlapping
++        // group. In the multi-input case those lists duplicate each input once
++        // per window membership (e.g. for covariance and correlation).
++        let use_lazy_groups = acs.iter().all(|ac| {
++            matches!(ac.agg_state(), AggState::NotAggregated(_))
++                && ac.groups.is_overlapping()
++        });
++        let keep_names = self.flags.contains(FunctionFlags::PASS_NAME_TO_APPLY);
+         let mut iters = acs
+             .iter_mut()
+-            .map(|ac| ac.iter_groups(self.flags.contains(FunctionFlags::PASS_NAME_TO_APPLY)))
++            .map(|ac| -> Box<dyn Iterator<Item = Option<Column>> + '_> {
++                if use_lazy_groups {
++                    Box::new(ac.iter_groups_lazy().map(move |s| {
++                        s.map(|mut s| {
++                            if !keep_names {
++                                s.rename(PlSmallStr::EMPTY);
++                            }
++                            s.into()
++                        })
++                    }))
++                } else {
++                    Box::new(
++                        ac.iter_groups(keep_names)
++                            .map(|s| s.map(|s| s.deep_clone().into())),
++                    )
++                }
++            })
+             .collect::<Vec<_>>();
+ 
+         // Length of the items to iterate over.
+@@ -370,7 +392,7 @@ impl ApplyExpr {
+                         None => {
+                             builder.append_null();
+                         },
+-                        Some(s) => container.push(s.deep_clone().into()),
++                        Some(s) => container.push(s),
+                     }
+                 }
+                 let out = self
+@@ -389,7 +411,7 @@ impl ApplyExpr {
+                     for iter in &mut iters {
+                         match iter.next().unwrap() {
+                             None => return Ok(None),
+-                            Some(s) => container.push(s.deep_clone().into()),
++                            Some(s) => container.push(s),
+                         }
+                     }
+                     Ok(Some(
+diff --git a/crates/polars-expr/src/expressions/binary.rs b/crates/polars-expr/src/expressions/binary.rs
+index b96b1df..5b31118 100644
+--- a/crates/polars-expr/src/expressions/binary.rs
++++ b/crates/polars-expr/src/expressions/binary.rs
+@@ -304,6 +304,14 @@ impl BinaryExpr {
+ }
+ 
+ impl PhysicalExpr for BinaryExpr {
++    fn as_group_arithmetic(&self) -> Option<(&dyn PhysicalExpr, Operator, &dyn PhysicalExpr)> {
++        if self.output_field.dtype() == &DataType::Float64 && self.op.is_arithmetic() {
++            Some((self.left.as_ref(), self.op, self.right.as_ref()))
++        } else {
++            None
++        }
++    }
++
+     fn as_expression(&self) -> Option<&Expr> {
+         Some(&self.expr)
+     }
+diff --git a/crates/polars-expr/src/expressions/mod.rs b/crates/polars-expr/src/expressions/mod.rs
+index d3429d2..5f34ca6 100644
+--- a/crates/polars-expr/src/expressions/mod.rs
++++ b/crates/polars-expr/src/expressions/mod.rs
+@@ -735,6 +735,15 @@ impl<'a> AggregationContext<'a> {
+ /// Take a DataFrame and evaluate the expressions.
+ /// Implement this for Column, lt, eq, etc
+ pub trait PhysicalExpr: Send + Sync {
++    /// Expose arithmetic that can be evaluated one group at a time by a reduction.
++    fn as_group_arithmetic(&self) -> Option<(&dyn PhysicalExpr, Operator, &dyn PhysicalExpr)> {
++        None
++    }
++
++    fn is_group_arithmetic_leaf(&self) -> bool {
++        self.as_column().is_some() || self.is_literal()
++    }
++
+     fn as_expression(&self) -> Option<&Expr> {
+         None
+     }
+diff --git a/py-polars/tests/unit/operations/test_group_by_dynamic.py b/py-polars/tests/unit/operations/test_group_by_dynamic.py
+index 5a77da4..6a88285 100644
+--- a/py-polars/tests/unit/operations/test_group_by_dynamic.py
++++ b/py-polars/tests/unit/operations/test_group_by_dynamic.py
+@@ -16,6 +16,55 @@ if TYPE_CHECKING:
+     from polars._typing import ClosedInterval, EngineType, Label, StartBy
+ 
+ 
++@pytest.mark.parametrize("engine", ["streaming", "in-memory"])
++@pytest.mark.parametrize("closed", ["left", "right", "both", "none"])
++@pytest.mark.parametrize("period", ["1i", "4i", "20i"])
++@pytest.mark.parametrize("with_nulls", [False, True])
++def test_dynamic_group_by_centered_product_sum(
++    engine: EngineType, closed: ClosedInterval, period: str, with_nulls: bool
++) -> None:
++    # Independent means and len()-1 are deliberate: with unpaired nulls this
++    # formula has different semantics from pairwise-complete covariance.
++    x = [None if with_nulls and i % 5 == 0 else float(i % 7) for i in range(32)]
++    y = [None if with_nulls and i % 7 == 0 else float(i % 11) for i in range(32)]
++    df = pl.DataFrame(
++        {"g": [0] * 16 + [1] * 16, "t": list(range(16)) * 2, "x": x, "y": y}
++    )
++    df = pl.concat([df[:9], df[9:21], df[21:]], rechunk=False)
++    a, b = pl.col("x"), pl.col("y")
++    formula = ((a - a.mean()) * (b - b.mean())).sum() / (pl.len() - 1)
++    groups = df.lazy().group_by_dynamic(
++        "t", every="2i", period=period, group_by="g", closed=closed
++    )
++    result = groups.agg(value=formula).sort("g", "t").collect(engine=engine)
++    windows = groups.agg(a, b).sort("g", "t").collect(engine=engine)
++    expected_values = [
++        pl.DataFrame({"x": x, "y": y}, schema={"x": pl.Float64, "y": pl.Float64})
++        .select(formula)
++        .item()
++        for x, y in windows.select("x", "y").iter_rows()
++    ]
++    expected = windows.select("g", "t").with_columns(
++        pl.Series("value", expected_values, dtype=pl.Float64)
++    )
++    assert_frame_equal(result, expected, rel_tol=1e-13, abs_tol=1e-13)
++
++
++def test_dynamic_group_by_arithmetic_sum_udf_evaluated_once() -> None:
++    calls = []
++
++    def identity(s: pl.Series) -> pl.Series:
++        calls.append(len(s))
++        return s
++
++    df = pl.DataFrame({"t": range(12), "x": [float(i) for i in range(12)]})
++    a = pl.col("x")
++    result = df.group_by_dynamic("t", every="2i", period="4i").agg(
++        ((a.map_batches(identity, return_dtype=pl.Float64) - a.mean()) * a).sum()
++    )
++    assert len(calls) == result.height
++
++
+ @pytest.mark.parametrize(
+     ("name", "match"),
+     [

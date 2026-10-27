@@ -1,0 +1,111 @@
+{
+  "build_profile": "Both nodebug-release: opt-level 3, thin LTO",
+  "measurements": [
+    {
+      "case": "polars-cov-alt",
+      "elapsed_seconds": 1.7914263340062462,
+      "peak_rss_bytes": 4299931648,
+      "peak_footprint_bytes": 5254878032,
+      "rows": 77000,
+      "polars": "2.1.0",
+      "duckdb": "1.5.1",
+      "python": "3.14.2",
+      "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+      "polars_threads": 14,
+      "ooc_memory_budget_mb": null,
+      "variant": "first_patch",
+      "repetition": 1
+    },
+    {
+      "case": "polars-cov-alt",
+      "elapsed_seconds": 0.2985647500026971,
+      "peak_rss_bytes": 369672192,
+      "peak_footprint_bytes": 319571264,
+      "rows": 77000,
+      "polars": "2.1.0",
+      "duckdb": "1.5.1",
+      "python": "3.14.2",
+      "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+      "polars_threads": 14,
+      "ooc_memory_budget_mb": null,
+      "variant": "extended_patch",
+      "repetition": 1
+    },
+    {
+      "case": "polars-cov-alt",
+      "elapsed_seconds": 0.2782859579892829,
+      "peak_rss_bytes": 369295360,
+      "peak_footprint_bytes": 319178024,
+      "rows": 77000,
+      "polars": "2.1.0",
+      "duckdb": "1.5.1",
+      "python": "3.14.2",
+      "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+      "polars_threads": 14,
+      "ooc_memory_budget_mb": null,
+      "variant": "extended_patch",
+      "repetition": 2
+    },
+    {
+      "case": "polars-cov-alt",
+      "elapsed_seconds": 2.106766459008213,
+      "peak_rss_bytes": 4029300736,
+      "peak_footprint_bytes": 5115106008,
+      "rows": 77000,
+      "polars": "2.1.0",
+      "duckdb": "1.5.1",
+      "python": "3.14.2",
+      "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+      "polars_threads": 14,
+      "ooc_memory_budget_mb": null,
+      "variant": "first_patch",
+      "repetition": 2
+    },
+    {
+      "case": "polars-cov-alt",
+      "elapsed_seconds": 1.1905699170310982,
+      "peak_rss_bytes": 5209423872,
+      "peak_footprint_bytes": 5214294816,
+      "rows": 77000,
+      "polars": "2.1.0",
+      "duckdb": "1.5.1",
+      "python": "3.14.2",
+      "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+      "polars_threads": 14,
+      "ooc_memory_budget_mb": null,
+      "variant": "first_patch",
+      "repetition": 3
+    },
+    {
+      "case": "polars-cov-alt",
+      "elapsed_seconds": 0.30428279197076336,
+      "peak_rss_bytes": 363741184,
+      "peak_footprint_bytes": 313607440,
+      "rows": 77000,
+      "polars": "2.1.0",
+      "duckdb": "1.5.1",
+      "python": "3.14.2",
+      "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+      "polars_threads": 14,
+      "ooc_memory_budget_mb": null,
+      "variant": "extended_patch",
+      "repetition": 3
+    }
+  ],
+  "summary": [
+    {
+      "variant": "first_patch",
+      "runs": 3,
+      "median_seconds": 1.7914263340062462,
+      "median_peak_footprint_gib": 4.856190472841263,
+      "median_peak_rss_gib": 4.0046234130859375
+    },
+    {
+      "variant": "extended_patch",
+      "runs": 3,
+      "median_seconds": 0.2985647500026971,
+      "median_peak_footprint_gib": 0.297257699072361,
+      "median_peak_rss_gib": 0.34393310546875
+    }
+  ]
+}

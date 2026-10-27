@@ -1,0 +1,57 @@
+--- a/crates/polars-expr/src/expressions/apply.rs
++++ b/crates/polars-expr/src/expressions/apply.rs
+@@ -351,11 +351,33 @@
+         // Without groups there is no output to take the dtype of a dynamic literal from.
+         let dtype = field.dtype.clone().materialize_unknown(true)?;
+ 
+-        // Aggregate representation of the aggregation contexts,
+-        // then unpack the lists and finally create iterators from this list chunked arrays.
++        // As in apply_single_group_aware, avoid materializing every overlapping
++        // group. In the multi-input case those lists duplicate each input once
++        // per window membership (e.g. for covariance and correlation).
++        let use_lazy_groups = acs.iter().all(|ac| {
++            matches!(ac.agg_state(), AggState::NotAggregated(_))
++                && ac.groups.is_overlapping()
++        });
++        let keep_names = self.flags.contains(FunctionFlags::PASS_NAME_TO_APPLY);
+         let mut iters = acs
+             .iter_mut()
+-            .map(|ac| ac.iter_groups(self.flags.contains(FunctionFlags::PASS_NAME_TO_APPLY)))
++            .map(|ac| -> Box<dyn Iterator<Item = Option<Column>> + '_> {
++                if use_lazy_groups {
++                    Box::new(ac.iter_groups_lazy().map(move |s| {
++                        s.map(|mut s| {
++                            if !keep_names {
++                                s.rename(PlSmallStr::EMPTY);
++                            }
++                            s.into()
++                        })
++                    }))
++                } else {
++                    Box::new(
++                        ac.iter_groups(keep_names)
++                            .map(|s| s.map(|s| s.deep_clone().into())),
++                    )
++                }
++            })
+             .collect::<Vec<_>>();
+ 
+         // Length of the items to iterate over.
+@@ -370,7 +392,7 @@
+                         None => {
+                             builder.append_null();
+                         },
+-                        Some(s) => container.push(s.deep_clone().into()),
++                        Some(s) => container.push(s),
+                     }
+                 }
+                 let out = self
+@@ -389,7 +411,7 @@
+                     for iter in &mut iters {
+                         match iter.next().unwrap() {
+                             None => return Ok(None),
+-                            Some(s) => container.push(s.deep_clone().into()),
++                            Some(s) => container.push(s),
+                         }
+                     }
+                     Ok(Some(

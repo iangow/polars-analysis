@@ -1,0 +1,20 @@
+🍹 Building a mixed python/rust project
+🐍 Found CPython 3.14 at <WORKSPACE>/work/polars-patched/bin/python
+🔗 Found pyo3 bindings with abi3-py3.11 support
+💻 Using `MACOSX_DEPLOYMENT_TARGET=11.0` for aarch64-apple-darwin by default
+   Compiling polars-expr v0.55.1 (<WORKSPACE>/work/polars-build/crates/polars-expr)
+   Compiling polars-mem-engine v0.55.1 (<WORKSPACE>/work/polars-build/crates/polars-mem-engine)
+   Compiling polars-stream v0.55.1 (<WORKSPACE>/work/polars-build/crates/polars-stream)
+   Compiling polars-lazy v0.55.1 (<WORKSPACE>/work/polars-build/crates/polars-lazy)
+   Compiling polars-sql v0.55.1 (<WORKSPACE>/work/polars-build/crates/polars-sql)
+   Compiling polars v0.55.1 (<WORKSPACE>/work/polars-build/crates/polars)
+   Compiling polars-python v0.55.1 (<WORKSPACE>/work/polars-build/crates/polars-python)
+   Compiling polars-runtime-32 v2.1.0 (<WORKSPACE>/work/polars-build/py-polars/runtime/polars-runtime-32)
+warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets in compact unwind table, performance of exception handling might be affected
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `polars-runtime-32` (lib) generated 1 warning
+    Finished `nodebug-release` profile [optimized] target(s) in 10m 06s
+📦 Including files matching "_polars_runtime_32/build_feature_flags.py"
+📦 Built wheel for abi3 Python ≥ 3.11 to <WORKSPACE>/work/patched-wheels/polars_runtime_32-2.1.0-cp311-abi3-macosx_11_0_arm64.whl
