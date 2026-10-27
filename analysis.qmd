@@ -4,6 +4,17 @@ date: 2026-10-27
 format: html
 ---
 
+::: {.callout-note title="Tested candidate fixes available"}
+
+Two candidate fixes for Polars 2.1 are available with the reproducer and before-and-after results in [issue #30354](https://github.com/pola-rs/polars/issues/30354):
+
+- **Covariance, correlation and multi-input grouped apply:** [download the patch](reproducer/multi-input-apply.patch).
+- **Composed covariance (`cov_alt()`):** [download the patch](reproducer/composed-window-sum.patch).
+
+The [combined tested patch](reproducer/candidate-fix.patch), [reproducer bundle](reproducer/reproducer.zip), [build instructions](reproducer/BUILD.md) and [numerical validation](reproducer/results/patch-validation.json) are available. The fixes change Polars' execution engine; the Python formulas are unchanged. These are candidate fixes, not changes in an official Polars release.
+
+:::
+
 Several months ago, I wrote a Polars query to estimate 60-month betas for each firm and month from daily stock-return data. It divides the covariance of market and firm returns by the market-return variance. The original query used over 80 GB before failing on my Mac mini M4 Pro, which has 24 GiB RAM. I moved it to DuckDB.
 
 Polars 2.1 did not resolve the memory issue by itself. Its unmodified covariance/correlation path still expands overlapping windows into large lists. A candidate patch, now compiled and tested, avoids that expansion for the multi-input aggregation path and for the direct `cov_alt()` formula. On the original 25-million-row synthetic beta query, it reduced footprint from about **24.45 GiB to 1.96 GiB**, with **bit-for-bit identical results**.
