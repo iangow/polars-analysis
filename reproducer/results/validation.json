@@ -1,0 +1,8 @@
+{
+  "polars_rows": 77000,
+  "duckdb_rows": 77000,
+  "identical_keys": true,
+  "identical_counts": true,
+  "max_absolute_covariance_difference": 3.7269449679189215e-20,
+  "polars_outputs_unchanged_by_patch": true
+}

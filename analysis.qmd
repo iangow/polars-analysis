@@ -1,77 +1,20 @@
 ---
-title: "Comparing `.group_by_dynamic()` with DuckDB equivalent"
+title: "Polars 2.1: Memory use in overlapping 60-month windows"
+date: 2026-10-27
 format: html
-execute:
-  cache: true
 ---
 
-Recently, I wrote a Polars query to calculate 60-month betas (i.e., regression coefficients) for each firm and each month in a sample of stock price data.
-The pandas code in the [original book](https://www.tidy-finance.org/python/beta-estimation.html#estimating-beta-using-daily-returns) from which the query originates uses a cumbersome batch-processing approach to minimize RAM consumption.
-I had figured that Polars would do fine with this query, but when I ran it in its original form it used up over 80 GB of RAM before failing (I only have 24 GB of physical RAM in my Mac mini M4 Pro).
+Several months ago, I wrote a Polars query to estimate 60-month betas for each firm and month from daily stock-return data. It divides the covariance of market and firm returns by the market-return variance. The original query used over 80 GB before failing on my Mac mini M4 Pro, which has 24 GiB RAM. I moved it to DuckDB.
 
-My guess is that Polars is creating copies of the data to construct each window.
-I don't know anything about the internals of Polars, but this copying seems unnecessary in principle.
-I believe that PostgreSQL uses the windows in place without copying.
-The window here are sixty months of daily return data with the resulting calculations for each firm being retained the first day of each month.
+Polars 2.1 did not resolve the memory issue by itself. Its unmodified covariance/correlation path still expands overlapping windows into large lists. A candidate patch, now compiled and tested, avoids that expansion for the multi-input aggregation path and for the direct `cov_alt()` formula. On the original 25-million-row synthetic beta query, it reduced footprint from about **24.45 GiB to 1.96 GiB**, with **bit-for-bit identical results**.
 
-To create a reproducible test, I create synthetic data (a little smaller than the original) and save it in Parquet format.
-I then run the key elements of the Polar query on this data set and, as a proxy for PostgreSQL, I use DuckDB to do the same query.
+## The original query
 
-In summary, I find that DuckDB runs much faster and uses much less RAM than Polars.
-I conjecture that this is because DuckDB is not copying data to form each window.
+The query originated in the [Tidy Finance beta-estimation example](https://www.tidy-finance.org/python/beta-estimation.html#estimating-beta-using-daily-returns). My [original analysis source](https://github.com/iangow/polars-analysis/blob/16de251e5e5878568f19e775308ede2ec09b47bb/analysis.qmd) contains the earlier generator and benchmark.
 
-```{python}
-import inspect
+```python
 import polars as pl
-import duckdb
-import json
-import subprocess
-import sys
-from pathlib import Path
-import numpy as np
-from datetime import date, timedelta
-```
 
-## Generate the data
-
-Here I generate some synthetic data and save it in a Parquet file.
-Apart from potentially facilitating a streaming engine (not available in this case at this time), this makes it easy to do the same query in DuckDB and Polars.
-
-```{python}
-def write_synth_parquet(
-    path: str | Path,
-    n_firms: int = 10_000,
-    n_days: int = 2_500,
-    seed: int = 0,
-):
-    path = Path(path)
-
-    rng = np.random.default_rng(seed)
-
-    start = date(2000, 1, 1)
-    dates = np.array(
-        [start + timedelta(days=i) for i in range(n_days)],
-        dtype="datetime64[D]",
-    )
-
-    df = pl.DataFrame(
-        {
-            "firm_id": np.repeat(np.arange(n_firms, dtype=np.int32), n_days),
-            "date": np.tile(dates, n_firms),
-            "ret_excess": rng.normal(0.0, 0.02, n_firms * n_days),
-            "mkt_excess": rng.normal(0.0, 0.02, n_firms * n_days),
-        }
-    ).sort("firm_id", "date")
-
-    df.write_parquet(path)
-    return path
-
-path = write_synth_parquet("synthetic.parquet")
-```
-
-This `build_results_lz()` function builds the lazy query for Polars.
-
-```{python}
 def build_results_lz(min_obs: int = 1000) -> pl.LazyFrame:
     return (
         pl.scan_parquet("synthetic.parquet")
@@ -92,177 +35,159 @@ def build_results_lz(min_obs: int = 1000) -> pl.LazyFrame:
         )
         .filter(pl.col("n") >= min_obs)
     )
+
+results = build_results_lz().collect()
 ```
 
-This `collect_polars()` function actually executes the Polars query.
+The existing synthetic input has 10,000 firms × 2,500 days = 25,000,000 rows. It was reused for the before/after check. Input SHA-256: `42a4f6fc9747e2636c51e7de06b62433a3a0d0b7e6e922dd3159f38666712309`.
 
-```{python}
-def collect_polars(min_obs: int = 1000) -> pl.DataFrame:
-    return (
-        build_results_lz(min_obs)
-        .collect()
-    )
-```
+## Full-size results with matching windows
 
-Here is the equivalent query in DuckDB:
+| Query | Seconds | Peak RSS, GiB | Peak total footprint, GiB | Rows |
+|---|---:|---:|---:|---:|
+| Released Polars 2.1, earlier run | 164.76 | 4.18 | 24.45 | 770,000 |
+| Patched Polars 2.1 | 1.59 | 2.01 | 1.96 | 770,000 |
+| Patched Polars 2.1, cov_alt beta | 2.79 | 2.13 | 2.09 | 770,000 |
+| DuckDB 1.5.1, aligned windows | 7.39 | 2.16 | 2.04 | 770,000 |
 
-```{python}
-def run_duckdb(min_obs: int = 1000) -> pl.DataFrame:
-    con = duckdb.connect()
+All full-size outputs have the same 770,000 firm/date keys and observation counts. The patched and unmodified Polars results for the built-in covariance formula are exactly equal, including every floating-point value. The maximum beta difference versus DuckDB is 3.33e-16.
 
-    query = f"""
-        SELECT
-            firm_id,
-            date,
-            covar_pop(mkt_excess, ret_excess) OVER w
-                / var_pop(mkt_excess) OVER w AS beta,
-            avg(ret_excess) OVER w AS mean_ret,
-            avg(mkt_excess) OVER w AS mean_mkt,
-            count(*) OVER w AS n
-        FROM 'synthetic.parquet'
-        WINDOW w AS (
-            PARTITION BY firm_id
-            ORDER BY date
-            RANGE BETWEEN INTERVAL 60 MONTH PRECEDING AND INTERVAL 1 DAY PRECEDING
-        )
-        QUALIFY
-            date = date_trunc('month', date)
-                    AND count(*) OVER w >= {min_obs}
-        ORDER BY firm_id, date
-    """
+The full-size `cov_alt()` beta query completed in 2.79 seconds with 2.09 GiB peak footprint. All 770,000 output rows, including floating-point bits, match released Polars run in 20 complete-firm partitions of 500 firms each. Every observation for a firm stays in its partition, so the reference retains each window's data. The patched measurement runs the entire input in one process. The partitioned reference is a correctness check; its timings are not presented as a whole-query benchmark.
 
-    return con.sql(query).pl()
-```
-`
-Here I analyze the lazy query from above.
 
-```{python}
-results_lz = build_results_lz()
+These full-size timings are single observations. The earlier released Polars run exceeded physical RAM and was sensitive to compression, paging and machine activity. The local build also uses thin LTO, while the official wheel uses fat LTO. Those are limits on attributing the exact runtime ratio to the patch. The large memory reduction is the principal result.
 
-results_lz.show_graph(engine="streaming")
-```
+### Aligning DuckDB with Polars
 
-And here I run the query.
+The DuckDB comparison now evaluates the same window-label grid as Polars. Per firm, it generates monthly labels through 60 months after the last input month, appends null-valued evaluation rows, and evaluates the same half-open 60-month intervals. `count(observation)` counts real input rows, so evaluation rows affect neither observation counts nor covariance. The only output threshold is `n >= 1000`, in both engines. No last-input-date filter is added to Polars.
 
-```{python}
-results_pl = results_lz.collect()
-```
+This gives 77,000 rows in each smaller reproducer and 770,000 rows in each original full-size result, including the later labels produced by Polars. A separate smoke check also passed with weekday-only observations and null values. The earlier SQL that retained only dates present in the input is retained as historical provenance, not used as the current comparator.
 
-Here's the resulting data frame from the Polars code.
+The smaller reproducer uses this SQL for covariance:
 
-```{python}
-results_pl
-```
-
-Next I run the DuckDB query.
-
-```{python}
-results_db = run_duckdb()
-```
-
-Here's the resulting data frame from the DuckDB code.
-
-```{python}
-results_db
-```
-
-I merge the two sets of results to confirm that they are (essentially) identical.
-
-```{python}
-import polars.selectors as cs
-
-joined = (
-    results_db
-    .join(
-        results_pl,
-        on=["firm_id", "date"],
-        suffix="_right",
-    )
+```sql
+WITH observations AS (
+    SELECT firm_id, date, x, y FROM 'synthetic.parquet'
+), bounds AS (
+    SELECT firm_id,
+           date_trunc('month', min(date)) + INTERVAL 1 MONTH AS first_label,
+           date_trunc('month', max(date)) + INTERVAL 60 MONTH AS last_label
+    FROM observations GROUP BY firm_id
+), evaluation_points AS (
+    SELECT firm_id,
+           unnest(generate_series(first_label, last_label, INTERVAL 1 MONTH))::DATE AS date
+    FROM bounds
+), window_input AS (
+    SELECT firm_id, date, x, y, 1 AS observation, false AS is_evaluation
+    FROM observations
+    UNION ALL
+    SELECT firm_id, date, NULL::DOUBLE, NULL::DOUBLE, NULL::INTEGER, true
+    FROM evaluation_points
 )
-```
-
-From the following, we can see that Polars and DuckDB are producing the same results (up to machine precision).
-
-```{python}
-diff_summary = (
-    joined
-    .select([
-        (pl.col(c) - pl.col(f"{c}_right")).abs().max().alias(f"{c}_max_abs_diff")
-        for c in joined.select(
-            cs.exclude("firm_id", "date", cs.ends_with("_right"))
-        ).columns
-    ])
+SELECT firm_id, date, covar_samp(x, y) OVER w AS value,
+       count(observation) OVER w AS n
+FROM window_input
+WINDOW w AS (
+    PARTITION BY firm_id ORDER BY date
+    RANGE BETWEEN INTERVAL 60 MONTH PRECEDING
+              AND INTERVAL 1 DAY PRECEDING
 )
+QUALIFY is_evaluation AND count(observation) OVER w >= 1000
+ORDER BY firm_id, date
 
-diff_summary
 ```
 
-## Benchmark
+The original full-size comparison uses the same grid and frame, with covariance divided by market-return variance and the two means added to the output.
 
-Here's some code to run benchmark analysis.
+## A self-contained synthetic reproducer
 
-```{python}
-#| code-fold: true
-#| code-summary: "Show code"
-def run_benchmark(name: str, fn, *helpers) -> dict:
-    helper_sources = "\n\n".join(inspect.getsource(helper) for helper in helpers)
-    fn_source = inspect.getsource(fn)
-    runner = f"""
-import duckdb
-import json
-import polars as pl
-import resource
-import time
+The [minimal example](reproducer/minimal.py) generates 1,000 firms × 2,500 calendar days = 2,500,000 rows: **57.22 MiB uncompressed input**. The x and y values are deterministic trigonometric functions. No financial data, credentials, external files or NumPy installation are needed.
 
-{helper_sources}
-
-{fn_source}
-
-start = time.perf_counter()
-results = {fn.__name__}()
-elapsed_seconds = time.perf_counter() - start
-peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-
-print(json.dumps({{
-    "name": {name!r},
-    "elapsed_seconds": elapsed_seconds,
-    "peak_rss_bytes": peak_rss,
-}}))
-"""
-
-    proc = subprocess.run(
-        [sys.executable, "-c", runner],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    stdout_lines = [line for line in proc.stdout.splitlines() if line.strip()]
-    if not stdout_lines:
-        raise RuntimeError(f"{name} benchmark produced no stdout")
-    return json.loads(stdout_lines[-1])
-
-
-def benchmark_table(*benchmarks: dict) -> pl.DataFrame:
-    return (
-        pl.DataFrame(benchmarks)
-        .with_columns(
-            elapsed_ms=(pl.col("elapsed_seconds") * 1000).round(2),
-            peak_rss_mb=(pl.col("peak_rss_bytes") / (1024 * 1024)).round(2),
-        )
-        .select("name", "elapsed_seconds", "elapsed_ms", "peak_rss_bytes", "peak_rss_mb")
-        .sort("elapsed_seconds")
-    )
+```sh
+uv run --no-project minimal.py cov
+uv run --no-project minimal.py cov-alt
+uv run --no-project minimal.py self-cov
+uv run --no-project minimal.py var
+uv run --no-project minimal.py corr
+uv run --no-project minimal.py mean
 ```
 
-And here's the benchmark analysis.
+The [runner](reproducer/repro.py) tests additional aggregates and formulas, including cases motivated by [my book](https://iangow.github.io/era_pl_book/): the direct covariance formula in [the basics chapter](https://iangow.github.io/era_pl_book/py-intro.html) and grouped beta/alpha estimation in [FFJR](https://iangow.github.io/era_pl_book/ffjr.html).
 
-```{python}
-polars_collect_benchmark = run_benchmark(
-    "polars_collect",
-    collect_polars,
-    build_results_lz,
-)
-duckdb_benchmark = run_benchmark("duckdb_window", run_duckdb)
-
-benchmark_table(polars_collect_benchmark, duckdb_benchmark)
+```sh
+uv run --no-project repro.py --sweep --book-cases --output repro-results --verbose
 ```
+
+## Released wheel and compiled patch
+
+These are medians of three alternating fresh-process measurements per build on the **same input file**, using Python 3.14.2, macOS 27.2, Apple M4 Pro and 14 Polars threads. Timing excludes imports, data generation, output serialization and validation. Memory is each fresh worker process's peak, including its interpreter and imported libraries, captured before serialization and validation. Data generation runs separately.
+
+| Query | Released seconds | Patched seconds | Released footprint, GiB | Patched footprint, GiB |
+|---|---:|---:|---:|---:|
+| Covariance, streaming | 0.739 | 0.181 | 2.573 | 0.297 |
+| Covariance, in-memory | 0.658 | 0.159 | 2.570 | 0.297 |
+| Covariance of x with itself | 0.818 | 0.162 | 2.519 | 0.243 |
+| Pearson correlation | 0.786 | 0.174 | 2.570 | 0.298 |
+| Spearman correlation | 8.296 | 7.850 | 2.573 | 0.298 |
+| FFJR beta and alpha | 1.922 | 0.182 | 4.875 | 0.298 |
+| Custom two-input aggregate | 2.151 | 1.587 | 2.573 | 0.297 |
+| Book cov_alt expression | 2.164 | 0.295 | 4.892 | 0.298 |
+| Variance of x and y | 0.075 | 0.077 | 0.297 | 0.296 |
+| Mean of x | 0.046 | 0.067 | 0.242 | 0.242 |
+
+The aligned DuckDB covariance query returned the same 77,000 keys and counts, with 0.370 GiB footprint and 0.421 seconds median runtime. Its covariance values agree within 3.73e-20.
+
+The other built-in unary aggregates tested—variance, standard deviation, mean, sum, min, max, median, quantile, distinct count, skewness and kurtosis—are around 0.24 GiB. Two variances together, reading the same x and y columns as covariance, use around 0.30 GiB. `cov(x, x)` is another useful control: it computes the same statistic as variance but had a footprint around 2.52 GiB before the patch.
+
+RSS and total footprint are both recorded. On macOS, RSS can omit compressed or swapped memory; the footprint measure is `ri_lifetime_max_phys_footprint`. GiB means 2^30 bytes.
+
+## Implementation and tested fix
+
+The Polars 2.1 source suggests that the memory expansion occurs before the numerical covariance kernel:
+
+1. The multi-input group-aware apply path calls `iter_groups()` on each input. For an unaggregated input, that calls `aggregated()`, which calls `agg_list()`. See [multi-input apply](https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-expr/src/expressions/apply.rs#L343-L403), [group iteration](https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-expr/src/expressions/group_iter.rs#L62-L74) and [aggregation context](https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-expr/src/expressions/mod.rs#L451-L473).
+2. For numeric slice groups, `agg_list()` appends each window's values to a new list-values buffer. Overlapping values are therefore copied repeatedly. See [numeric list aggregation](https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-core/src/frame/group_by/aggregations/agg_list.rs#L91-L111).
+3. Mean and variance have specialized aggregation paths, including rolling kernels that operate on the original values and window offsets. See [mean](https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-core/src/frame/group_by/aggregations/mod.rs#L991-L1027) and [variance](https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-core/src/frame/group_by/aggregations/mod.rs#L1056-L1090).
+4. The single-input apply path already has a lazy iteration branch for overlapping groups. The corresponding multi-input path does not use it. See [the existing safeguard](https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-expr/src/expressions/apply.rs#L139-L150). The low-level covariance function itself uses an accumulator state; it does not require all windows to be copied at once ([kernel](https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-ops/src/chunked_array/cov.rs#L7-L29)).
+
+This is a static source trace, not an allocation-profiler trace. However, it also predicts the observed scale: these 2,500,000 input rows participate in 150,000,000 window memberships before the output filters. Copying two Float64 values per membership takes 2,400,000,000 bytes (2.24 GiB), before vector capacity, input columns, output arrays and other overhead. The measured footprint is about 2.57 GiB.
+
+
+
+
+The candidate patch has now been built against the exact Polars 2.1.0 release commit, using its pinned `nightly-2026-09-01` toolchain, default full runtime features, 32-bit indices and the optimized `nodebug-release` profile. Python was 3.14.2 throughout.
+
+The official wheel uses `dist-release` (fat LTO); the local build used thin LTO. Timings therefore include a build-profile difference. The before/after memory reduction and exact numerical comparisons are the principal checks here. Build provenance records the commit, patch hash, wheel hash and both imported native-module hashes.
+
+All 26 Polars benchmark outputs and the 240 original edge cases are bit-for-bit identical before and after the patch. The 384 additional composed-expression scenarios have identical values, null/NaN positions and non-NaN floating-point bits. Some NaN bit patterns differ between the official and local builds; the same differences were present in the earlier compiled patch. 1674 upstream tests passed. The aligned DuckDB result has the same full keys and observation counts and agrees within floating-point precision. These checks do not constitute the entire Polars test suite.
+
+The candidate extends the existing lazy overlapping-group iteration to multi-input apply when all inputs are unaggregated overlapping slice groups. Each input then yields one view of its original values per window, rather than first building the large expanded lists. The other states retain the eager path. [Patch](reproducer/candidate-fix.patch), [implementation notes](reproducer/SOURCE_NOTES.md) and [build instructions](reproducer/BUILD.md) are available.
+
+The book's `cov_alt()` expression uses a separate [binary group-aware path](https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-expr/src/expressions/binary.rs#L277-L305). That path materializes the centered inputs and their product for every overlapping window. The first `ApplyExpr` patch left its footprint at about 4.89 GiB.
+
+The extended patch recognizes Float64 arithmetic over columns, column means and literals feeding a sum on the original overlapping slice groups. It computes the means through the existing aggregation kernels, then evaluates and sums one window at a time. It preserves the expression's independent means, null handling, denominator and arithmetic order; it does not replace the expression with pairwise-complete covariance. The measured footprint is now **0.298 GiB**, versus **4.892 GiB** on released 2.1, with bit-for-bit identical output. Other expression types and group layouts retain their existing evaluation paths. This is a scoped candidate, not a general solution for every composed aggregation.
+
+A separate comparison keeps the build profile fixed: both local wheels use `nodebug-release` with thin LTO. Across three alternating fresh-process runs, `cov_alt()` changed from 1.791 seconds and 4.856 GiB with the first patch to 0.299 seconds and 0.297 GiB with the extended patch. The output is bit-for-bit identical.
+
+
+## Two candidate patches
+
+Both candidate fixes change Polars' Rust execution engine. The Python `cov_alt()` formula is unchanged.
+
+- [Multi-input apply patch](reproducer/multi-input-apply.patch): lazy window views for covariance, correlation and other multi-input grouped functions.
+- [Composed-sum patch](reproducer/composed-window-sum.patch): evaluate and sum Float64 arithmetic over columns and column means one overlapping window at a time.
+- [Combined patch](reproducer/candidate-fix.patch): the exact source change used for the final build and numerical validation.
+
+The separate patches are supplied for review. The final benchmark and regression results were recorded with both applied; the earlier multi-input-only build also provides the same-profile control.
+
+## What about spilling in Polars 2.1?
+
+This keyed dynamic aggregation still appears as an `in-memory-map` fallback. The [native streaming path requires no additional grouping keys](https://github.com/pola-rs/polars/blob/7f902bd3ffd27ff82d14278a09a295ff2f7aed92/crates/polars-stream/src/physical_plan/lower_group_by.rs#L1491-L1515). The [new group-by spilling](https://github.com/pola-rs/polars/pull/29911) and [window spilling](https://github.com/pola-rs/polars/pull/30282) operate on supported streaming nodes. The tested fix reduces covariance/correlation memory within the existing fallback; it does not add a streaming operator.
+
+## Files and checks
+
+- [Reproducer bundle](reproducer/reproducer.zip), [instructions](reproducer/README.md) and [build instructions](reproducer/BUILD.md).
+- [Released measurements](reproducer/results/measurements.json), [patched measurements](reproducer/results/patched-measurements.json) and [comparison CSV](reproducer/results/patch-comparison.csv).
+- [Numerical validation](reproducer/results/patch-validation.json), [build provenance](reproducer/results/build-provenance.json) and [1674-test upstream log](reproducer/results/upstream-tests.txt).
+
+All 26 Polars benchmark outputs, 240 original edge cases and the full-size results matched bit for bit. The 384 additional composed-expression scenarios have identical values, null/NaN positions and non-NaN floating-point bits; their NaN bit-pattern differences are recorded separately. Independent DuckDB executions can differ by floating-point rounding. The patch has not been tested against the entire Polars suite. The generated data is not included in the download.

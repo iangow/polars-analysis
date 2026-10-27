@@ -1,0 +1,8 @@
+{
+  "rows": 2500000,
+  "columns": 4,
+  "uncompressed_bytes": 60000000,
+  "parquet_bytes": 38209645,
+  "firms": 1000,
+  "days_per_firm": 2500
+}

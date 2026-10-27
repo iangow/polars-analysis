@@ -1,0 +1,182 @@
+total memory: 24.000 GiB (25769803776 bytes)
+_init_credential_provider_builder(): credential_provider_init = None
+async thread count: 14
+blocking thread count: 512
+sourcing parquet scan file schema from: 'work/issue-repro-sweep/synthetic.parquet'
+parquet max cached metadata scans: 8
+polars-stream: updating graph state
+updating in-memory-sink, before: [Blocked] []
+updating in-memory-sink, after: [Ready] [] (took 83ns)
+updating simple-projection, before: [Blocked] [Ready]
+updating simple-projection, after: [Ready] [Blocked] (took 42ns)
+updating sort, before: [Blocked] [Ready]
+updating sort, after: [Ready] [Blocked] (took 83ns)
+updating with-columns, before: [Blocked] [Ready]
+updating with-columns, after: [Ready] [Blocked] (took 0ns)
+updating filter, before: [Blocked] [Ready]
+updating filter, after: [Ready] [Blocked] (took 42ns)
+updating in-memory-map, before: [Blocked] [Ready]
+updating in-memory-map, after: [Ready] [Blocked] (took 0ns)
+updating multi-scan[parquet], before: [] [Ready]
+updating multi-scan[parquet], after: [] [Ready] (took 705.417µs)
+updating in-memory-map, before: [Ready] [Ready]
+updating in-memory-map, after: [Ready] [Blocked] (took 41ns)
+polars-stream: running in-memory-map in subgraph
+polars-stream: running multi-scan[parquet] in subgraph
+async download_chunk_size_random_access: 8388608
+async download_chunk_size: 67108864
+[ParquetReaderBuilder]: prefetch_limit: 512, prefetch_kbytes_limit: 458752
+[MultiScanTaskInit]: 1 sources, reader name: parquet, Ok(ReaderCapabilities(ROW_INDEX | PRE_SLICE | NEGATIVE_PRE_SLICE | PARTIAL_FILTER | FULL_FILTER | MAPPED_COLUMN_PROJECTION | UNORDERED_FILES)), n_readers_pre_init: 1, max_concurrent_scans: 1, disable_morsel_split: false, maintain_order: true
+[MultiScanTaskInit]: predicate: None, deletion_files: None, skip files mask: None, predicate to reader: None
+[MultiScanTaskInit]: scan_source_idx: 0, extra_ops: ExtraOperations { row_index: None, row_index_col_idx: 18446744073709551615, pre_slice: None, include_file_paths: None, file_path_col_idx: 18446744073709551615, predicate: None }
+[MultiScanTaskInit]: Readers init: 1 / (1 total) (range: 0..1, filtered out: 0)
+[MultiScanTaskInit]: unordered_files: false (reason: order observed), unordered_init: false
+[MultiScan]: Initialize source 0
+[ParquetReaderBuilder]: file read_context as configured: read_concurrency: 32, posix_fadv: normal, o_direct: false
+[ReaderStarter]: scan_source_idx: 0
+[ReaderStarter]: scan_source_idx: 0: pre_slice_to_reader: None, external_filter_mask: None, file_iceberg_schema: None
+[ReaderStarter]: max_concurrent_scans is 1, waiting..
+[AttachReaderToBridge]: received reader (n_readers_received: 1)
+[ParquetFileReader]: project: 4 / 4, pre_slice: None, resolved_pre_slice: None, row_index: None, predicate: None, maintain_order: true
+memory prefetch function: madvise_willneed
+[ParquetFileReader]: Config { num_pipelines: 14, row_group_prefetch_size: 20, target_values_per_thread: 16777216, last_morsel_pipelines: 14 }
+[ParquetFileReader]: ideal_morsel_size: 100000, use_async_prefetch: false, concurrency: None, chunk_size: None
+[ParquetFileReader]: Deferred cached reads: 0 / 20 row groups
+start_reader_impl: scan_source_idx: 0, first_morsel_position: RowCounter { physical_rows: 0, deleted_rows: 0 }
+start_reader_impl: scan_source_idx: 0, ApplyExtraOps::Noop, first_morsel_position: RowCounter { physical_rows: 0, deleted_rows: 0 }
+[ReaderStarter]: Stopping (no more readers)
+[MultiScanState]: Readers disconnected
+polars-stream: done running graph phase
+polars-stream: updating graph state
+updating in-memory-sink, before: [Blocked] []
+updating in-memory-sink, after: [Ready] [] (took 167ns)
+updating simple-projection, before: [Blocked] [Ready]
+updating simple-projection, after: [Ready] [Blocked] (took 166ns)
+updating sort, before: [Blocked] [Ready]
+updating sort, after: [Ready] [Blocked] (took 250ns)
+updating with-columns, before: [Blocked] [Ready]
+updating with-columns, after: [Ready] [Blocked] (took 125ns)
+updating filter, before: [Blocked] [Ready]
+updating filter, after: [Ready] [Blocked] (took 125ns)
+updating in-memory-map, before: [Ready] [Ready]
+updating in-memory-map, after: [Ready] [Blocked] (took 125ns)
+updating multi-scan[parquet], before: [] [Ready]
+updating multi-scan[parquet], after: [] [Done] (took 17.458µs)
+updating in-memory-map, before: [Done] [Ready]
+updating in-memory-map, after: [Done] [Ready] (took 1.167548458s)
+updating filter, before: [Ready] [Ready]
+updating filter, after: [Ready] [Ready] (took 42ns)
+updating with-columns, before: [Ready] [Ready]
+updating with-columns, after: [Ready] [Ready] (took 84ns)
+updating sort, before: [Ready] [Ready]
+updating sort, after: [Ready] [Blocked] (took 167ns)
+updating multi-scan[parquet], before: [] [Done]
+updating multi-scan[parquet], after: [] [Done] (took 208ns)
+polars-stream: running with-columns in subgraph
+polars-stream: running filter in subgraph
+polars-stream: running sort in subgraph
+polars-stream: running in-memory-map in subgraph
+polars-stream: done running graph phase
+polars-stream: updating graph state
+updating in-memory-sink, before: [Blocked] []
+updating in-memory-sink, after: [Ready] [] (took 0ns)
+updating simple-projection, before: [Blocked] [Ready]
+updating simple-projection, after: [Ready] [Blocked] (took 0ns)
+updating sort, before: [Ready] [Ready]
+updating sort, after: [Ready] [Blocked] (took 83ns)
+updating with-columns, before: [Ready] [Ready]
+updating with-columns, after: [Ready] [Ready] (took 41ns)
+updating filter, before: [Ready] [Ready]
+updating filter, after: [Ready] [Ready] (took 41ns)
+updating in-memory-map, before: [Done] [Ready]
+updating in-memory-map, after: [Done] [Done] (took 9.583µs)
+updating filter, before: [Done] [Ready]
+updating filter, after: [Ready] [Done] (took 41ns)
+updating with-columns, before: [Done] [Ready]
+updating with-columns, after: [Ready] [Done] (took 0ns)
+updating sort, before: [Done] [Ready]
+sort: buffered 2926112 bytes, partition threshold 33554432 bytes
+updating sort, after: [Done] [Ready] (took 2.061625ms)
+updating simple-projection, before: [Ready] [Ready]
+updating simple-projection, after: [Ready] [Ready] (took 0ns)
+updating in-memory-sink, before: [Ready] []
+updating in-memory-sink, after: [Ready] [] (took 41ns)
+updating with-columns, before: [Done] [Done]
+updating with-columns, after: [Done] [Done] (took 0ns)
+updating filter, before: [Done] [Done]
+updating filter, after: [Done] [Done] (took 0ns)
+updating in-memory-map, before: [Done] [Done]
+updating in-memory-map, after: [Done] [Done] (took 42ns)
+updating multi-scan[parquet], before: [] [Done]
+updating multi-scan[parquet], after: [] [Done] (took 125ns)
+polars-stream: running in-memory-sink in subgraph
+polars-stream: running simple-projection in subgraph
+polars-stream: running sort in subgraph
+polars-stream: done running graph phase
+polars-stream: updating graph state
+updating in-memory-sink, before: [Ready] []
+updating in-memory-sink, after: [Ready] [] (took 42ns)
+updating simple-projection, before: [Ready] [Ready]
+updating simple-projection, after: [Ready] [Ready] (took 0ns)
+updating sort, before: [Done] [Ready]
+updating sort, after: [Done] [Ready] (took 125ns)
+updating with-columns, before: [Done] [Done]
+updating with-columns, after: [Done] [Done] (took 42ns)
+updating filter, before: [Done] [Done]
+updating filter, after: [Done] [Done] (took 41ns)
+updating in-memory-map, before: [Done] [Done]
+updating in-memory-map, after: [Done] [Done] (took 41ns)
+updating multi-scan[parquet], before: [] [Done]
+updating multi-scan[parquet], after: [] [Done] (took 42ns)
+polars-stream: running in-memory-sink in subgraph
+polars-stream: running simple-projection in subgraph
+polars-stream: running sort in subgraph
+polars-stream: done running graph phase
+polars-stream: updating graph state
+updating in-memory-sink, before: [Ready] []
+updating in-memory-sink, after: [Ready] [] (took 42ns)
+updating simple-projection, before: [Ready] [Ready]
+updating simple-projection, after: [Ready] [Ready] (took 0ns)
+updating sort, before: [Done] [Ready]
+updating sort, after: [Done] [Done] (took 12.375µs)
+updating simple-projection, before: [Done] [Ready]
+updating simple-projection, after: [Ready] [Done] (took 0ns)
+updating in-memory-sink, before: [Done] []
+updating in-memory-sink, after: [Done] [] (took 41ns)
+updating simple-projection, before: [Done] [Done]
+updating simple-projection, after: [Done] [Done] (took 42ns)
+updating sort, before: [Done] [Done]
+updating sort, after: [Done] [Done] (took 0ns)
+updating with-columns, before: [Done] [Done]
+updating with-columns, after: [Done] [Done] (took 0ns)
+updating filter, before: [Done] [Done]
+updating filter, after: [Done] [Done] (took 0ns)
+updating in-memory-map, before: [Done] [Done]
+updating in-memory-map, after: [Done] [Done] (took 0ns)
+updating multi-scan[parquet], before: [] [Done]
+updating multi-scan[parquet], after: [] [Done] (took 83ns)
+_init_credential_provider_builder(): credential_provider_init = None
+polars-stream: updating graph state
+updating io-sink[single-file[parquet]], before: [Blocked] []
+updating io-sink[single-file[parquet]], after: [Ready] [] (took 125ns)
+updating in-memory-source, before: [] [Ready]
+updating in-memory-source, after: [] [Ready] (took 42ns)
+updating io-sink[single-file[parquet]], before: [Ready] []
+updating io-sink[single-file[parquet]], after: [Ready] [] (took 41ns)
+polars-stream: running io-sink[single-file[parquet]] in subgraph
+polars-stream: running in-memory-source in subgraph
+io-sink[single-file[parquet]]: start_single_file_sink_pipeline: file_writer_starter: parquet, target_sink_morsel_size: TargetSinkMorselSize { target_num_rows: 122880, target_num_bytes: 18446744073709551615, target_num_bytes_min_rows: 16384, target_num_rows_mode: Approximate }, inflight_morsel_limit: 18, upload_chunk_size: Some(33554432), upload_concurrency: 24, io_metrics: false, build_sinked_path_info_list: false
+polars-stream: done running graph phase
+polars-stream: updating graph state
+updating io-sink[single-file[parquet]], before: [Ready] []
+updating io-sink[single-file[parquet]], after: [Ready] [] (took 84ns)
+updating in-memory-source, before: [] [Ready]
+updating in-memory-source, after: [] [Done] (took 42ns)
+updating io-sink[single-file[parquet]], before: [Done] []
+io-sink[single-file[parquet]]: Join on task_handle (recv PortState::Done)
+io-sink[single-file[parquet]]: Statistics: total_size: RowCountAndSize { num_rows: 77000, num_bytes: 1540000 }
+updating io-sink[single-file[parquet]], after: [Done] [] (took 6.342625ms)
+updating in-memory-source, before: [] [Done]
+updating in-memory-source, after: [] [Done] (took 42ns)
+_init_credential_provider_builder(): credential_provider_init = None
+sourcing parquet scan file schema from: 'work/issue-repro-sweep/synthetic.parquet'

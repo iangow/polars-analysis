@@ -4,14 +4,4 @@ title: "Polars Analysis"
 
 This site collects analysis notes and benchmarks built around Polars.
 
-The current write-up compares a Polars `.group_by_dynamic()` workflow against an equivalent DuckDB window query for rolling 60-month beta estimation.
-
-The main write-up is here:
-
-- [Analysis](analysis.qmd)
-
-The project is set up as a Quarto website, so you can publish it with:
-
-```bash
-quarto publish gh-pages
-```
+The latest [analysis](analysis.qmd) revisits the memory use of overlapping 60-month beta windows with Polars 2.1 and DuckDB, includes a smaller synthetic reproducer, and traces the covariance aggregation path in the release source.

@@ -1,5 +1,10 @@
 project:
   type: website
+  render:
+    - index.qmd
+    - analysis.qmd
+  resources:
+    - reproducer/**
 
 website:
   title: "Polars Analysis"
@@ -16,6 +21,3 @@ format:
     theme: cosmo
     toc: true
     code-fold: false
-
-execute:
-  freeze: auto

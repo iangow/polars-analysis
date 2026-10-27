@@ -1,0 +1,24 @@
+{
+  "files": 1,
+  "rows": 77000,
+  "all_exact": true,
+  "all_non_nan_float_bits_equal": true,
+  "all_float_bits_equal": true,
+  "nan_bit_pattern_differences": 0,
+  "checks": [
+    {
+      "file": "first_patch.parquet",
+      "rows": 77000,
+      "exact": true,
+      "floating_point_bits_equal": {
+        "value": true
+      },
+      "non_nan_float_bits_equal": {
+        "value": true
+      },
+      "nan_bit_pattern_differences": {
+        "value": 0
+      }
+    }
+  ]
+}
