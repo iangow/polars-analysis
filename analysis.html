@@ -193,6 +193,24 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </header>
 
 
+<div class="callout callout-style-default callout-note callout-titled" title="Tested candidate fixes available">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Note</span>Tested candidate fixes available
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Two candidate fixes for Polars 2.1 are available with the reproducer and before-and-after results in <a href="https://github.com/pola-rs/polars/issues/30354">issue #30354</a>:</p>
+<ul>
+<li><strong>Covariance, correlation and multi-input grouped apply:</strong> <a href="reproducer/multi-input-apply.patch">download the patch</a>.</li>
+<li><strong>Composed covariance (<code>cov_alt()</code>):</strong> <a href="reproducer/composed-window-sum.patch">download the patch</a>.</li>
+</ul>
+<p>The <a href="reproducer/candidate-fix.patch">combined tested patch</a>, <a href="reproducer/reproducer.zip">reproducer bundle</a>, <a href="reproducer/BUILD.md">build instructions</a> and <a href="reproducer/results/patch-validation.json">numerical validation</a> are available. The fixes change Polars’ execution engine; the Python formulas are unchanged. These are candidate fixes, not changes in an official Polars release.</p>
+</div>
+</div>
 <p>Several months ago, I wrote a Polars query to estimate 60-month betas for each firm and month from daily stock-return data. It divides the covariance of market and firm returns by the market-return variance. The original query used over 80 GB before failing on my Mac mini M4 Pro, which has 24 GiB RAM. I moved it to DuckDB.</p>
 <p>Polars 2.1 did not resolve the memory issue by itself. Its unmodified covariance/correlation path still expands overlapping windows into large lists. A candidate patch, now compiled and tested, avoids that expansion for the multi-input aggregation path and for the direct <code>cov_alt()</code> formula. On the original 25-million-row synthetic beta query, it reduced footprint from about <strong>24.45 GiB to 1.96 GiB</strong>, with <strong>bit-for-bit identical results</strong>.</p>
 <section id="the-original-query" class="level2">
